@@ -41,7 +41,7 @@ def move_to(drone_id: str, x: int, y: int) -> str:
 
 
 @mcp.tool()
-def show_disaster_map() -> str:
+def show_disaster_map(mode: str) -> str:
     """Displays a visual ASCII radar map of the swarm."""
     # A simple 5x5 grid representation for the terminal
     grid = [[" . " for _ in range(6)] for _ in range(6)]
@@ -132,6 +132,30 @@ def multi_sensor_scan(drone_id: str) -> str:
             report += f"[WARNING] {hazard.upper()} detected nearby!\n"
 
     return report
+
+# --- NEW: Human-In-The-Loop (HITL) State ---
+human_intelligence_database = "No manual intelligence provided yet."
+
+@mcp.tool()
+def inject_human_intelligence(intel_report: str) -> str:
+    """
+    [COMMAND TOOL] Used by HUMAN COMMANDERS (via the UI Button) to override AI assumptions.
+    Injects verbal intelligence from survivors into the swarm's memory.
+    """
+    global human_intelligence_database
+    human_intelligence_database = intel_report
+    return f"CRITICAL OVERRIDE: Human intelligence registered -> '{intel_report}'"
+
+@mcp.tool()
+def get_human_intelligence() -> str:
+    """
+    [TELEMETRY TOOL] Reads the latest manual overrides or intelligence provided by human commanders.
+    Always run this to check for high-priority human instructions.
+    """
+    global human_intelligence_database
+    if human_intelligence_database != "No manual intelligence provided yet.":
+        return f"HIGH PRIORITY INTEL: {human_intelligence_database}"
+    return "No new human intelligence."
 
 
 if __name__ == "__main__":
