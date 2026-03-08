@@ -9,5 +9,13 @@ setup(
         "ollama",
         "pymongo",
         "python-dotenv",
+        "fastapi",
+        "uvicorn",
+        "networkx",
+        "langchain>=0.3.0",
+        "langchain-community>=0.3.0",
+        "langchain-ollama>=0.2.0",
+        "chromadb>=0.5.0",
+        "mcp>=1.0.0",
     ],
 )
