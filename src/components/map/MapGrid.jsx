@@ -1,244 +1,413 @@
 "use client";
-import React, { useRef, useCallback } from "react";
+import { useRef, useCallback, useEffect } from "react";
 import { AnimatePresence } from "framer-motion";
-import { Crosshair, RefreshCw } from "lucide-react";
-import { useFleetStore } from "@/store/useFleetStore";
-import TopoGrid from "./TopoGrid";
+import { Activity, Crosshair, RefreshCw, Radio } from "lucide-react";
+import { useFleetStore, SENSOR_COLOR, SENSOR_MODES } from "@/store/useFleetStore";
+import TopoGrid    from "./TopoGrid";
 import ThermalZone from "./ThermalZone";
-import DroneMapIcon from "./DroneMapIcon";
+import DroneMapIcon  from "./DroneMapIcon";
 import OverrideCursor from "./OverrideCursor";
-import RelayLink from "./RelayLink";
-import { AI_CYAN, HUMAN_MAG, OK_GREEN, WARN_AMB, CRIT_RED, MAX_FLEET, MISSION } from "@/lib/constants";
+import RelayLink      from "./RelayLink";
+import { AI_CYAN, HUMAN_MAG, OK_GREEN } from "@/lib/constants";
 
-/**
- * MapGrid
- * - Renders the tactical map (grid + radar sweep + mesh links)
- * - Hosts the 10Hz simulation loop (physics + battery + trails) via the store
- * - Visualizes drone-mounted thermal scanning zones + selection cursor
- */
+// ── Sensor overlay layer ──────────────────────────────────────────────────────
+// Refactored: Full-Spectrum Sensor Suite
+// Every drone projects ALL FOUR sensor modes simultaneously for maximum situational awareness.
+// Uses pure SVG animations and optical blending to create a high-intensity fusion effect.
+function SensorOverlayLayer({ drones }) {
+  return (
+    <svg
+      style={{
+        position: "absolute", inset: 0,
+        width: "100%", height: "100%",
+        pointerEvents: "none",
+        mixBlendMode: "plus-lighter",
+        zIndex: 3,
+      }}
+      viewBox="0 0 100 100"
+      preserveAspectRatio="none"
+    >
+      <defs>
+        {SENSOR_MODES.map((mode) => (
+          <radialGradient key={`grad-${mode}`} id={`grad-${mode}`} cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stopColor={SENSOR_COLOR[mode]} stopOpacity="0.45" />
+            <stop offset="100%" stopColor={SENSOR_COLOR[mode]} stopOpacity="0" />
+          </radialGradient>
+        ))}
+      </defs>
+
+      {drones.map((d) => (
+        <DroneSensor key={d.id} drone={d} />
+      ))}
+    </svg>
+  );
+}
+
+// ── Sensor Sub-components ─────────────────────────────────────────────────────
+
+function DroneSensor({ drone }) {
+  const { x, y } = drone;
+
+  return (
+    <g transform={`translate(${x}, ${y})`}>
+      {/* Render specific tactical animations for SIGNAL, SOUND, and THERMAL modes */}
+      {/* CV box is intentionally removed to declutter the view */}
+      <SensorThermal />
+      <SensorSignal color={SENSOR_COLOR.SIGNAL} />
+      <SensorSound color={SENSOR_COLOR.SOUND} />
+    </g>
+  );
+}
+
+function SensorThermal() {
+  // A soft, organic radial pulse (Cyan)
+  // Uses gradient fill for smooth, non-geometric look
+  return (
+    <circle r="9" fill={`url(#grad-THERMAL)`}>
+      <animate attributeName="r" values="8;11;8" dur="4s" repeatCount="indefinite" />
+      <animate attributeName="opacity" values="0.4;0.7;0.4" dur="4s" repeatCount="indefinite" />
+    </circle>
+  );
+}
+
+function SensorSignal({ color }) {
+  // Expanding hexagonal rings (radio waves) (Magenta)
+  // Hexagon approximation points for r=1
+  const hexPoints = "0,-1 0.866,-0.5 0.866,0.5 0,1 -0.866,0.5 -0.866,-0.5";
+  return (
+    <g>
+      {[0, 1].map((i) => (
+        <polygon key={i} points={hexPoints} fill="none" stroke={color} strokeWidth="0.12">
+          <animateTransform attributeName="transform" type="scale" values="1;12" dur="3s" begin={`${i * 1.5}s`} repeatCount="indefinite" />
+          <animate attributeName="opacity" values="0.6;0" dur="3s" begin={`${i * 1.5}s`} repeatCount="indefinite" />
+        </polygon>
+      ))}
+    </g>
+  );
+}
+
+function SensorSound({ color }) {
+  // Concentric sonar ripples with staggered start times (Yellow)
+  return (
+    <g>
+      {[0, 1].map((i) => (
+        <circle key={i} r="1" fill="none" stroke={color} strokeWidth="0.15">
+          <animate attributeName="r" values="1;14" dur="2.5s" begin={`${i * 1.2}s`} repeatCount="indefinite" />
+          <animate attributeName="opacity" values="0.6;0" dur="2.5s" begin={`${i * 1.2}s`} repeatCount="indefinite" />
+        </circle>
+      ))}
+    </g>
+  );
+}
+
+// ── Sensor mode HUD legend ────────────────────────────────────────────────────
+// Displays which sensor modes are currently active across the fleet.
+function SensorModeLegend({ drones }) {
+  // Count how many drones are running each mode
+  const counts = SENSOR_MODES.reduce((acc, m) => {
+    acc[m] = drones.filter((d) => d.sensorMode === m).length;
+    return acc;
+  }, {});
+
+  const modeLabels = {
+    THERMAL: "THERMAL",
+    CV:      "COMP-VIS",
+    SIGNAL:  "RF-SIG",
+    SOUND:   "ACOUSTIC",
+  };
+
+  return (
+    <div style={{
+      display: "flex", gap: 8, alignItems: "center",
+      fontSize: 8, fontFamily: "'Share Tech Mono',monospace",
+    }}>
+      {SENSOR_MODES.map((mode) => {
+        const c     = SENSOR_COLOR[mode];
+        const count = counts[mode];
+        return (
+          <div key={mode} style={{
+            display: "flex", alignItems: "center", gap: 4,
+            opacity: count > 0 ? 1 : 0.3,
+            transition: "opacity 0.3s",
+          }}>
+            {/* Colour swatch */}
+            <div style={{
+              width: 8, height: 8, borderRadius: 1,
+              background: c,
+              boxShadow: count > 0 ? `0 0 5px ${c}` : "none",
+            }} />
+            <span style={{ color: c }}>
+              {modeLabels[mode]}: {count}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
 export default function MapGrid() {
-  const drones = useFleetStore(s => s.drones);
-  const activeDrone = useFleetStore(s => s.activeDrone);
-  const setActiveDrone = useFleetStore(s => s.setActiveDrone);
-  const toggleMode = useFleetStore(s => s.toggleMode);
-  const getMeshEdges = useFleetStore(s => s.getMeshEdges);
-  const healingLinks = useFleetStore(s => s.healingLinks); 
+  const drones          = useFleetStore((s) => s.drones);
+  const activeDrone     = useFleetStore((s) => s.activeDrone);
+  const setActiveDrone  = useFleetStore((s) => s.setActiveDrone);
+  const toggleMode      = useFleetStore((s) => s.toggleMode);
+  const cycleSensorMode = useFleetStore((s) => s.cycleSensorMode);
+  const tick_update     = useFleetStore((s) => s.tick_update);
+  const getMeshEdges    = useFleetStore((s) => s.getMeshEdges);
 
   const mapRef = useRef(null);
 
-  // Target selection: pick the nearest drone to the click point
+  // Physics heartbeat — drives drone drift via requestAnimationFrame.
+  // Throttled to one store write per 100 ms to avoid thrashing React.
+  useEffect(() => {
+    let handle;
+    let lastTime = 0;
+    const loop = (time) => {
+      if (time - lastTime >= 100) {
+        tick_update();
+        lastTime = time;
+      }
+      handle = requestAnimationFrame(loop);
+    };
+    handle = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(handle);
+  }, [tick_update]);
+
+  // Click-to-select: converts pixel coords to map-percentage coords and finds
+  // the nearest drone within 8 percentage-units of the click point.
   const handleMapClick = useCallback((e) => {
     if (!mapRef.current) return;
     const rect = mapRef.current.getBoundingClientRect();
-    const px = ((e.clientX - rect.left) / rect.width) * 100;
-    const py = ((e.clientY - rect.top) / rect.height) * 100;
+    const px   = ((e.clientX - rect.left) / rect.width)  * 100;
+    const py   = ((e.clientY - rect.top)  / rect.height) * 100;
 
-    let closest = null, minD = 8;
-    drones.forEach(d => {
+    let closest = null;
+    let minD    = 8; // selection radius in map-percentage units
+
+    drones.forEach((d) => {
       const dist = Math.sqrt((d.x - px) ** 2 + (d.y - py) ** 2);
       if (dist < minD) { minD = dist; closest = d.id; }
     });
+
+    // Clicking empty space deselects; clicking a drone selects it
     setActiveDrone(closest);
   }, [drones, setActiveDrone]);
 
-  const edges = getMeshEdges();
-  const activeD = drones.find(d => d.id === activeDrone);
-  const aiLinks = edges.filter((e) => !e.isHuman).length;
-  const humanLinks = edges.filter((e) => e.isHuman).length;
-  const meshStatus =
-    drones.length < 2 ? "OFFLINE" : healingLinks.size > 0 ? "HEALING" : edges.length >= Math.max(0, drones.length - 1) ? "OPTIMAL" : "DEGRADED";
-  const meshColor = meshStatus === "OPTIMAL" ? OK_GREEN : meshStatus === "OFFLINE" ? CRIT_RED : WARN_AMB;
-  const sectorLabel = `SECTOR ${MISSION?.sector ?? "7G"}`;
+  const edges  = getMeshEdges();
+  const activeD = drones.find((d) => d.id === activeDrone);
+
+  // Pass the active drone's sensor mode to ThermalZone; fall back to THERMAL
+  const activeSensorMode = activeD?.sensorMode ?? "THERMAL";
+  const activeSensorColor = SENSOR_COLOR[activeSensorMode] ?? AI_CYAN;
 
   return (
-    <div style={{ flex: 1, position: "relative", overflow: "hidden", background: "#02080f" }}>
-      
-      {/* Tactical Header Bar (Real-time Telemetry) */}
+    <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
+      <style>{`
+        @keyframes sweep {
+          from { transform: rotate(0deg); }
+          to   { transform: rotate(360deg); }
+        }
+        @keyframes blink {
+          0%, 100% { opacity: 1; }
+          50%       { opacity: 0.3; }
+        }
+      `}</style>
+
+      {/* ── Tactical header ─────────────────────────────────────────────── */}
       <div style={{
-        position: "absolute",
-        top: 0,
-        left: 0,
-        right: 0,
-        zIndex: 12,
-        height: 54,
-        display: "flex",
-        alignItems: "center",
-        padding: "7px 12px",
-        background: "linear-gradient(180deg, rgba(0,10,22,0.92) 0%, rgba(0,6,16,0.82) 100%)",
-        borderBottom: `1px solid ${AI_CYAN}22`,
-        boxShadow: "0 8px 22px rgba(0,0,0,0.35)",
+        position: "absolute", top: 0, left: 0, right: 0, zIndex: 12,
+        display: "flex", alignItems: "center",
+        padding: "7px 13px",
+        background: "rgba(0,3,12,0.88)",
+        borderBottom: `1px solid ${AI_CYAN}18`,
       }}>
         <div style={{
-          width: 96,
-          height: 34,
-          border: `1px solid ${AI_CYAN}22`,
-          borderRadius: 4,
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: "center",
-          padding: "0 10px",
-          background: "rgba(0,0,0,0.35)",
-          gap: 2,
+          fontFamily: "'Orbitron',sans-serif", fontSize: 12,
+          fontWeight: 700, color: AI_CYAN, letterSpacing: 3,
         }}>
-          <div style={{ fontSize: 9, color: `${AI_CYAN}77`, fontFamily: "'Share Tech Mono'", letterSpacing: 2 }}>MESH</div>
-          <div style={{ fontSize: 9, color: `${AI_CYAN}55`, fontFamily: "'Share Tech Mono'", letterSpacing: 2 }}>PROTOCOL v4.2</div>
+          COMMANDER VIEW: SECTOR 7G
         </div>
 
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 18 }}>
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
-            <div style={{
-              fontSize: 9,
-              color: `${AI_CYAN}66`,
-              fontFamily: "'Share Tech Mono'",
-              letterSpacing: 2,
-              textTransform: "uppercase",
-              lineHeight: 1,
-            }}>
-              COMMANDER VIEW · {sectorLabel}
-            </div>
-            <div style={{
-              fontFamily: "'Orbitron',sans-serif",
-              fontSize: 18,
-              fontWeight: 900,
-              color: AI_CYAN,
-              letterSpacing: 3,
-              lineHeight: 1.02,
-              textTransform: "uppercase",
-              textAlign: "center",
-            }}>
-              <div>DECENTRALIZED</div>
-              <div>SWARM ALPHA</div>
-            </div>
-          </div>
+        <div style={{ flex: 1 }} />
 
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, marginTop: 2 }}>
-            <div style={{ fontSize: 6, color: `${AI_CYAN}66`, fontFamily: "'Share Tech Mono'", letterSpacing: 2 }}>NODES</div>
-            <div style={{ fontFamily: "'Orbitron',sans-serif", fontSize: 18, fontWeight: 900, color: AI_CYAN, letterSpacing: 2 }}>
-              {drones.length}/{MAX_FLEET}
-            </div>
-          </div>
-        </div>
+        {/* Live sensor-mode distribution legend */}
+        <SensorModeLegend drones={drones} />
 
-        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <div style={{ display: "flex", gap: 12 }}>
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 54 }}>
-              <div style={{ fontSize: 9, color: `${AI_CYAN}66`, fontFamily: "'Share Tech Mono'", letterSpacing: 2 }}>AI</div>
-              <div style={{ fontSize: 9, color: `${AI_CYAN}55`, fontFamily: "'Share Tech Mono'", letterSpacing: 2 }}>LINKS</div>
-              <div style={{ fontFamily: "'Orbitron',sans-serif", fontSize: 16, fontWeight: 900, color: AI_CYAN, letterSpacing: 2 }}>{aiLinks}</div>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 70 }}>
-              <div style={{ fontSize: 9, color: `${HUMAN_MAG}88`, fontFamily: "'Share Tech Mono'", letterSpacing: 2 }}>HUMAN</div>
-              <div style={{ fontSize: 9, color: `${HUMAN_MAG}66`, fontFamily: "'Share Tech Mono'", letterSpacing: 2 }}>LINKS</div>
-              <div style={{ fontFamily: "'Orbitron',sans-serif", fontSize: 16, fontWeight: 900, color: HUMAN_MAG, letterSpacing: 2 }}>{humanLinks}</div>
-            </div>
-          </div>
+        <div style={{ width: 1, background: `${AI_CYAN}22`, height: 16, margin: "0 12px" }} />
 
-          <div style={{
-            height: 34,
-            padding: "0 10px",
-            borderRadius: 4,
-            border: `1px solid ${meshColor}44`,
-            background: "rgba(0,0,0,0.35)",
-            display: "flex",
-            flexDirection: "column",
-            justifyContent: "center",
-            alignItems: "flex-end",
-            gap: 2,
-            minWidth: 98,
-          }}>
-            <div style={{ fontSize: 9, color: `${AI_CYAN}55`, fontFamily: "'Share Tech Mono'", letterSpacing: 2 }}>MESH</div>
-            <div style={{ fontFamily: "'Orbitron',sans-serif", fontSize: 14, fontWeight: 900, color: meshColor, letterSpacing: 2 }}>{meshStatus}</div>
-          </div>
+        {/* Fleet count */}
+        <div style={{
+          display: "flex", alignItems: "center", gap: 6,
+          fontSize: 11, color: AI_CYAN,
+        }}>
+          <Activity size={14} />
+          <span>{drones.length} UNITS ONLINE</span>
         </div>
       </div>
 
-      <div ref={mapRef} onClick={handleMapClick} style={{ position: "absolute", inset: 0, top: 54, cursor: "crosshair" }}>
-        
-        {/* 1) Terrain grid */}
+      {/* ── Map canvas ──────────────────────────────────────────────────── */}
+      <div
+        ref={mapRef}
+        onClick={handleMapClick}
+        style={{
+          position: "absolute", inset: 0, top: 46,
+          cursor: "crosshair",
+          background: "radial-gradient(ellipse at 46% 50%, #010d1c 0%, #02080f 100%)",
+        }}
+      >
+        {/* Layer 1 — Topographic grid (lowest, no blend mode) */}
         <TopoGrid />
 
-        {/* 2) Global thermal overlay (heatmap layer) */}
-        <ThermalZone drones={drones} activeId={activeDrone} />
-
-        {/* 1. Radar Scanning Layer (SVG Overlay) */}
-        <svg style={{ position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0.15, pointerEvents: "none" }} viewBox="0 0 900 540">
+        {/* Layer 2 — Radar sweep (decorative, normal blend) */}
+        <svg
+          style={{
+            position: "absolute", inset: 0,
+            width: "100%", height: "100%",
+            opacity: 0.18, pointerEvents: "none",
+          }}
+          viewBox="0 0 900 540"
+        >
+          <defs>
+            <linearGradient id="swpG">
+              <stop offset="0%"   stopColor={AI_CYAN} stopOpacity="0.8" />
+              <stop offset="100%" stopColor={AI_CYAN} stopOpacity="0"   />
+            </linearGradient>
+          </defs>
           <g style={{ transformOrigin: "450px 270px", animation: "sweep 7s linear infinite" }}>
             <path d="M450 270 L850 270 A400 400 0 0 0 450 -130 Z" fill="url(#swpG)" />
           </g>
-          <defs>
-            <linearGradient id="swpG">
-              <stop offset="0%" stopColor={AI_CYAN} stopOpacity="0.8" />
-              <stop offset="100%" stopColor={AI_CYAN} stopOpacity="0" />
-            </linearGradient>
-          </defs>
         </svg>
 
-        {/* 2. Dynamic Mesh Layer (SVG): Trails, Relay Links, and Self-Healing Guides */}
-        <svg style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}>
-          
-          {/* Render Flight Trails (Historical Movement Path) */}
-          {drones.map(d => d.trail?.map((pt, idx) => (
-            <circle key={`tr-${d.id}-${idx}`} cx={`${pt.x}%`} cy={`${pt.y}%`}
-              r={1.5 - idx * 0.15} fill={d.color || AI_CYAN} opacity={0.05 + idx * 0.04} />
-          )))}
+        {/* Layer 3 — Sensor footprint overlay (mix-blend-mode: plus-lighter) */}
+        <SensorOverlayLayer drones={drones} />
 
-          {/* Render Mesh Relay Edges (Communication Links) */}
-          {edges.map((edge, i) => <RelayLink key={edge.key} edge={edge} idx={i} />)}
-
-          {/* Render Self-Healing Navigation (Gap Recovery Waypoints) */}
-          {drones.filter(d => d.healTarget).map(d => (
-            <g key={`heal-${d.id}`}>
-              <circle cx={`${d.healTarget.x}%`} cy={`${d.healTarget.y}%`} r="8" fill="none"
-                stroke={OK_GREEN} strokeWidth="1" strokeDasharray="3 4" style={{ animation: "blink 1s infinite" }} />
-              <line x1={`${d.x}%`} y1={`${d.y}%`} x2={`${d.healTarget.x}%`} y2={`${d.healTarget.y}%`}
-                stroke={OK_GREEN} strokeWidth="1.5" strokeDasharray="4 5" opacity="0.6" />
-            </g>
+        {/* Layer 4 — Relay mesh links */}
+        <svg style={{
+          position: "absolute", inset: 0,
+          width: "100%", height: "100%",
+          pointerEvents: "none",
+          zIndex: 4,
+        }}>
+          {edges.map((edge, i) => (
+            <RelayLink key={edge.key} edge={edge} idx={i} />
           ))}
         </svg>
 
-        {/* 3) Drone icons and thermal-mounted cursor */}
-        <AnimatePresence>
-          {drones.map(d => (
-            <React.Fragment key={d.id}>
-              {/* Drone Hardware Representation */}
-              <DroneMapIcon 
-                drone={d} 
-                isActive={activeDrone === d.id} 
-                onClick={setActiveDrone} 
+        {/* Layer 5 — Drone icons (mix-blend-mode: plus-lighter keeps them bright over overlays) */}
+        <div style={{ mixBlendMode: "plus-lighter", position: "absolute", inset: 0, zIndex: 5 }}>
+          <AnimatePresence>
+            {drones.map((d) => (
+              <DroneMapIcon
+                key={d.id}
+                drone={d}
+                isActive={activeDrone === d.id}
+                onClick={setActiveDrone}
               />
-            </React.Fragment>
-          ))}
-        </AnimatePresence>
+            ))}
+          </AnimatePresence>
+        </div>
 
-        {/* 4. Targeting Reticle (Active Target Cursor) */}
-        {activeD && <OverrideCursor x={activeD.x} y={activeD.y} isManual={activeD.mode === "MANUAL"} />}
+        {/* Layer 6 — Manual-override cursor ring */}
+        {activeD && (
+          <OverrideCursor
+            x={activeD.x}
+            y={activeD.y}
+            isManual={activeD.mode === "MANUAL"}
+          />
+        )}
+
+        {/* Layer 7 — ThermalZone widget (bottom-left sensor display) */}
+        <ThermalZone sensorMode={activeSensorMode} />
+
+        {/* Map bottom status strip */}
+        <div style={{
+          position: "absolute", bottom: 0, left: 0, right: 0,
+          padding: "5px 13px",
+          background: "rgba(0,0,0,0.55)",
+          borderTop: `1px solid ${AI_CYAN}0f`,
+          display: "flex", gap: 18,
+          fontSize: 8, fontFamily: "'Share Tech Mono',monospace",
+          color: `${AI_CYAN}44`, zIndex: 10,
+        }}>
+          <span>
+            <span style={{ color: OK_GREEN }}>●</span> SIGNAL RELAY: GRID_7G-NORTH
+          </span>
+          {activeD && (
+            <span>
+              ACTIVE: <span style={{ color: activeSensorColor }}>{activeD.id}</span>
+              {" · SENSOR: "}
+              <span style={{ color: activeSensorColor }}>{activeSensorMode}</span>
+            </span>
+          )}
+          <span style={{ marginLeft: "auto" }}>
+            MESH LINKS: <span style={{ color: OK_GREEN }}>{edges.length}</span>
+          </span>
+        </div>
       </div>
 
-      {/* Footer Interaction Controls (Mission Overrides) */}
-      <div style={{ position: "absolute", bottom: 22, left: "50%", transform: "translateX(-50%)", display: "flex", gap: 12, zIndex: 20 }}>
+      {/* ── Bottom control bar ──────────────────────────────────────────── */}
+      <div style={{
+        position: "absolute", bottom: 22,
+        left: "50%", transform: "translateX(-50%)",
+        display: "flex", gap: 10, zIndex: 20,
+      }}>
+        {/* OVERRIDE: Toggle selected drone between AUTO and MANUAL control */}
         <button
           onClick={() => activeDrone && toggleMode(activeDrone)}
           disabled={!activeDrone}
           style={{
-            background: activeDrone ? "rgba(255,0,204,0.12)" : "rgba(255,255,255,0.03)",
-            border: `1px solid ${activeDrone ? HUMAN_MAG : "#333"}`,
-            color: activeDrone ? HUMAN_MAG : "#555",
-            padding: "8px 24px", borderRadius: 4, cursor: activeDrone ? "pointer" : "not-allowed",
-            fontFamily: "'Share Tech Mono'", fontSize: 11, letterSpacing: 1.5, display: "flex", alignItems: "center", gap: 8, transition: "all 0.3s"
+            background: activeDrone ? "rgba(255,0,204,0.15)" : "rgba(255,255,255,0.04)",
+            border:     `1px solid ${activeDrone ? HUMAN_MAG : "#333"}`,
+            color:      activeDrone ? HUMAN_MAG : "#555",
+            padding: "8px 18px", borderRadius: 4,
+            cursor: activeDrone ? "pointer" : "not-allowed",
+            fontFamily: "'Share Tech Mono',monospace",
+            fontSize: 11,
+            display: "flex", alignItems: "center", gap: 8,
+            transition: "all 0.2s",
           }}
         >
-          <Crosshair size={14} /> {activeDrone ? `OVERRIDE ${activeDrone}` : "AWAITING SELECTION"}
+          <Crosshair size={13} />
+          {activeDrone ? `OVERRIDE ${activeDrone}` : "SELECT DRONE"}
         </button>
 
+        {/* SENSOR: Cycle the active drone's detection mode */}
         <button
+          onClick={() => activeDrone && cycleSensorMode(activeDrone)}
+          disabled={!activeDrone}
           style={{
-            background: AI_CYAN, color: "#000", fontWeight: 900,
-            padding: "8px 24px", borderRadius: 4, cursor: "pointer",
-            fontFamily: "'Orbitron'", fontSize: 11, letterSpacing: 2, display: "flex", alignItems: "center", gap: 8,
-            boxShadow: `0 0 20px ${AI_CYAN}66`
+            background: activeDrone ? `${activeSensorColor}18` : "rgba(255,255,255,0.04)",
+            border:     `1px solid ${activeDrone ? activeSensorColor : "#333"}`,
+            color:      activeDrone ? activeSensorColor : "#555",
+            padding: "8px 18px", borderRadius: 4,
+            cursor: activeDrone ? "pointer" : "not-allowed",
+            fontFamily: "'Share Tech Mono',monospace",
+            fontSize: 11,
+            display: "flex", alignItems: "center", gap: 8,
+            boxShadow: activeDrone ? `0 0 10px ${activeSensorColor}33` : "none",
+            transition: "all 0.3s",
           }}
         >
-          <RefreshCw size={14} /> SYNC MESH
+          <Radio size={13} />
+          {activeDrone
+            ? `SENSOR: ${activeSensorMode}`
+            : "SELECT DRONE"}
+        </button>
+
+        {/* SYNC: Trigger a mesh re-sync with the local Llama node */}
+        <button
+          onClick={() => console.log("Syncing mesh with Local Llama-3.2 NPU...")}
+          style={{
+            background: AI_CYAN,
+            color: "#000", fontWeight: 700,
+            padding: "8px 18px", borderRadius: 4, cursor: "pointer",
+            fontFamily: "'Orbitron',sans-serif", fontSize: 11,
+            display: "flex", alignItems: "center", gap: 8,
+            boxShadow: `0 0 14px ${AI_CYAN}55`,
+          }}
+        >
+          <RefreshCw size={13} /> SYNC NODES
         </button>
       </div>
     </div>
