@@ -1,0 +1,16 @@
+{
+  "[project]/src/components/system/SimLoop.jsx [app-client] (ecmascript, next/dynamic entry)": {
+    "id": "[project]/src/components/system/SimLoop.jsx [app-client] (ecmascript, next/dynamic entry)",
+    "files": [
+      "static/chunks/src_components_system_SimLoop_jsx_984651b0._.js",
+      "static/chunks/src_components_system_SimLoop_jsx_96eb63c9._.js"
+    ]
+  },
+  "[project]/src/components/map/MapGrid.jsx [app-client] (ecmascript, next/dynamic entry)": {
+    "id": "[project]/src/components/map/MapGrid.jsx [app-client] (ecmascript, next/dynamic entry)",
+    "files": [
+      "static/chunks/_43e83fe6._.js",
+      "static/chunks/src_components_map_MapGrid_jsx_96eb63c9._.js"
+    ]
+  }
+}

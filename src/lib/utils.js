@@ -26,5 +26,8 @@ export function initDronePhysics(drone) {
     vy: (Math.random() - 0.5) * 0.065,
     healTarget: null,
     color: droneColor(drone.mode),
+    // Approximate sensor footprint radius in pixels (mapped in overlay)
+    // AUTO slightly larger to simulate higher autonomy scan coverage
+    sensorRadius: drone.sensorRadius ?? (drone.mode === "AUTO" ? Math.floor(rnd(26, 34)) : Math.floor(rnd(20, 28))),
   };
 }

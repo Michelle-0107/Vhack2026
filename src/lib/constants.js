@@ -26,6 +26,7 @@ export const BASE_DRONES = [
   { id: "U-03", name: "CHARLIE", battery: 42, alt: 122, spd: 45, sig: "INTERMITTENT", relay: "WARNING", x: 76, y: 26, mode: "AUTO", isRelay: false },
   { id: "U-04", name: "DELTA", battery: 14, alt: 98, spd: 22, sig: "WEAK", relay: "RE-ROUTING", x: 85, y: 55, mode: "MANUAL", isRelay: false },
   { id: "U-05", name: "ECHO", battery: 61, alt: 135, spd: 51, sig: "GOOD", relay: "ACTIVE", x: 60, y: 72, mode: "AUTO", isRelay: true },
+  { id: "U-06", name: "FOXTROT", battery: 67, alt: 118, spd: 36, sig: "GOOD", relay: "ACTIVE", x: 34, y: 68, mode: "AUTO", isRelay: true },
 ];
 
 export const TYPE_META = {

@@ -112,7 +112,7 @@ export default function MapGrid() {
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, marginTop: 2 }}>
-            <div style={{ fontSize: 9, color: `${AI_CYAN}66`, fontFamily: "'Share Tech Mono'", letterSpacing: 2 }}>NODES</div>
+            <div style={{ fontSize: 6, color: `${AI_CYAN}66`, fontFamily: "'Share Tech Mono'", letterSpacing: 2 }}>NODES</div>
             <div style={{ fontFamily: "'Orbitron',sans-serif", fontSize: 18, fontWeight: 900, color: AI_CYAN, letterSpacing: 2 }}>
               {drones.length}/{MAX_FLEET}
             </div>
@@ -154,11 +154,11 @@ export default function MapGrid() {
 
       <div ref={mapRef} onClick={handleMapClick} style={{ position: "absolute", inset: 0, top: 54, cursor: "crosshair" }}>
         
-        {/* Background Layer: Topographical Grid Lines */}
+        {/* 1) Terrain grid */}
         <TopoGrid />
 
-        {/* Legacy Thermal Zone Widget */}
-        <ThermalZone />
+        {/* 2) Global thermal overlay (heatmap layer) */}
+        <ThermalZone drones={drones} activeId={activeDrone} />
 
         {/* 1. Radar Scanning Layer (SVG Overlay) */}
         <svg style={{ position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0.15, pointerEvents: "none" }} viewBox="0 0 900 540">
@@ -196,13 +196,10 @@ export default function MapGrid() {
           ))}
         </svg>
 
-        {/* 3. Drone Thermal Signatures & Icon Layer */}
+        {/* 3) Drone icons and thermal-mounted cursor */}
         <AnimatePresence>
           {drones.map(d => (
             <React.Fragment key={d.id}>
-              {/* Thermal Scan Area (SAR Detection Range) */}
-              <ThermalZone x={d.x} y={d.y} color={d.color} isActive={activeDrone === d.id} />
-              
               {/* Drone Hardware Representation */}
               <DroneMapIcon 
                 drone={d} 

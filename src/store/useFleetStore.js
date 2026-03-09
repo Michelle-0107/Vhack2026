@@ -127,6 +127,7 @@ export const useFleetStore = create((set, get) => ({
       trail: [], vx: (Math.random() - 0.5) * 0.065,
       vy: (Math.random() - 0.5) * 0.065,
       healTarget: null, color: HUMAN_MAG,
+      sensorRadius: Math.floor(rnd(20, 28)),
     };
 
     set((s) => ({

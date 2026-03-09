@@ -1,9 +1,12 @@
+"use client";
+import dynamic from "next/dynamic";
 import SystemStatusBar from "@/components/system/SystemStatusBar";
 import FleetPanel from "@/components/fleet/SwarmRegistry";
-import MapGrid from "@/components/map/MapGrid";
 import AIIntelligenceHub from "@/components/logs/AIIntelligenceHub";
 import SystemFooter from "@/components/system/SystemFooter";
-import SimLoop from "@/components/system/SimLoop";
+
+const SimLoop = dynamic(() => import("@/components/system/SimLoop"), { ssr: false });
+const MapGrid = dynamic(() => import("@/components/map/MapGrid"), { ssr: false });
 
 export default function Home() {
   return (
