@@ -2,21 +2,26 @@
 import { create } from "zustand";
 import {
   BASE_DRONES, INITIAL_LOG, NAMES, SIGS,
-  MAX_FLEET, AI_CYAN, HUMAN_MAG,
+  MAX_FLEET, AI_CYAN, HUMAN_MAG
 } from "@/lib/constants";
-import { makeLog, nowStr, rnd, clamp, initDronePhysics, droneColor } from "@/lib/utils";
+import { makeLog, rnd, clamp, initDronePhysics, droneColor } from "@/lib/utils";
 
-// ── Seed physics onto base drones ────────────────────────────────────────────
+/**
+ * BEACON-NET Fleet Store
+ * - Holds simulated swarm state (positions, links, logs)
+ * - Runs a lightweight physics step (invoked at 10Hz by the map)
+ * - Implements CoT-style self-healing when relay nodes are recalled
+ */
 const seedDrones = BASE_DRONES.map(initDronePhysics);
 
 export const useFleetStore = create((set, get) => ({
-  // ─── State ────────────────────────────────────────────────────────────────
+  // Core state
   drones: seedDrones,
   log: INITIAL_LOG,
-  recalling: new Set(),      // Set of drone IDs mid-recall
-  newIds: new Set(),      // Set of freshly-deployed drone IDs
-  healingLinks: new Set(),      // Set of active heal-link keys
-  activeDrone: null,           // currently selected drone id
+  recalling: new Set(),       
+  newIds: new Set(),          
+  healingLinks: new Set(),    
+  activeDrone: null,          
   deployCount: BASE_DRONES.length,
   intelText: "",
   tick: 0,
@@ -24,29 +29,33 @@ export const useFleetStore = create((set, get) => ({
   sigBars: [55, 70, 48, 82, 90, 65, 44, 78, 92, 58, 71, 85],
   flashDeploy: false,
 
-  // ─── UI helpers ───────────────────────────────────────────────────────────
+  // UI actions
   setActiveDrone: (id) => set({ activeDrone: id }),
   setIntelText: (v) => set({ intelText: v }),
+  pushLog: (...entries) => set((s) => ({ log: [...s.log, ...entries] })),
 
-  pushLog: (...entries) =>
-    set((s) => ({ log: [...s.log, ...entries] })),
-
-  // ─── Map Links ────────────────────────────────────────────────────────────
+  // Mesh networking
   getMeshEdges: () => {
-    const { drones } = get();
+    const { drones, activeDrone } = get();
     const edges = [];
     for (let i = 0; i < drones.length; i++) {
       for (let j = i + 1; j < drones.length; j++) {
         const a = drones[i];
         const b = drones[j];
-        if (!a.isRelay && !b.isRelay) continue; // Must be at least 1 relay
+        
+        // At least one must be a relay to form a link
+        if (!a.isRelay && !b.isRelay) continue; 
+        
         const dx = a.x - b.x, dy = a.y - b.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < 42) {
+        
+        // Maximum transmission range: 45 units
+        if (dist < 45) {
           edges.push({
             key: `${a.id}-${b.id}`,
             a, b, dist,
-            isHuman: a.mode === "MANUAL" || b.mode === "MANUAL"
+            isHuman: a.mode === "MANUAL" || b.mode === "MANUAL",
+            isHighlit: activeDrone === a.id || activeDrone === b.id
           });
         }
       }
@@ -54,22 +63,32 @@ export const useFleetStore = create((set, get) => ({
     return edges;
   },
 
-  // ─── Tick: movement · battery drain · heal-move ───────────────────────────
+  // Heartbeat: physics, battery, trails
   tick_update: () => {
     set((s) => {
       const drones = s.drones.map((d) => {
         let nx = d.x + d.vx, ny = d.y + d.vy;
+        
+        // 1) Boundary physics (bounce at edges)
         let nvx = (nx < 10 || nx > 92) ? -d.vx : d.vx + (Math.random() - 0.5) * 0.012;
         let nvy = (ny < 10 || ny > 88) ? -d.vy : d.vy + (Math.random() - 0.5) * 0.012;
 
+        // 2) Self-healing navigation: nudge toward the healing waypoint
         if (d.healTarget) {
           const dx = d.healTarget.x - d.x, dy = d.healTarget.y - d.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist > 2) { nvx += dx / dist * 0.06; nvy += dy / dist * 0.06; }
-          else { nvx = d.vx; nvy = d.vy; }
+          if (dist > 2) { 
+            nvx += dx / dist * 0.06; 
+            nvy += dy / dist * 0.06; 
+          } else {
+            nvx = d.vx; nvy = d.vy;
+          }
         }
 
+        // 3) Trail history for the ghosting effect (last 8 points)
         const trail = [...(d.trail || []), { x: d.x, y: d.y }].slice(-8);
+        
+        // 4) Random battery depletion
         const battery = Math.max(1, d.battery - (Math.random() < 0.004 ? 1 : 0));
 
         return {
@@ -80,6 +99,7 @@ export const useFleetStore = create((set, get) => ({
         };
       });
 
+      // Update telemetry noise
       const latency = clamp(s.latency + (Math.random() - 0.5) * 0.35, 7, 30);
       const sigBars = [...s.sigBars.slice(1), Math.floor(rnd(35, 96))];
 
@@ -87,7 +107,7 @@ export const useFleetStore = create((set, get) => ({
     });
   },
 
-  // ─── DEPLOY UNIT (manual) ─────────────────────────────────────────────────
+  // Deployment
   deployUnit: () => {
     const { deployCount, pushLog } = get();
     if (deployCount >= MAX_FLEET) return;
@@ -95,13 +115,13 @@ export const useFleetStore = create((set, get) => ({
     const idx = deployCount;
     const newId = `U-${String(idx + 1).padStart(2, "0")}`;
     const name = NAMES[idx];
-    const battery = Math.floor(rnd(55, 92));
-    const sig = SIGS[Math.floor(Math.random() * SIGS.length)];
-
+    
     const newDrone = {
-      id: newId, name, battery,
-      alt: Math.floor(rnd(95, 155)), spd: Math.floor(rnd(30, 58)),
-      sig, relay: "ACTIVE",
+      id: newId, name, 
+      battery: Math.floor(rnd(75, 95)),
+      alt: Math.floor(rnd(95, 155)), 
+      spd: Math.floor(rnd(30, 58)),
+      sig: "EXCELLENT", relay: "ACTIVE",
       x: rnd(14, 88), y: rnd(14, 84),
       mode: "MANUAL", isRelay: false,
       trail: [], vx: (Math.random() - 0.5) * 0.065,
@@ -117,97 +137,103 @@ export const useFleetStore = create((set, get) => ({
     }));
 
     pushLog(
-      makeLog("MANUAL", `[HUMAN] ${newId} (${name}) manually deployed. Survivor sighting at grid ${Math.floor(rnd(10, 99))}-X.`),
-      makeLog("COT", `CoT: Detected new node ${newId} inserted by operator. Re-computing mesh coverage...`),
-      makeLog("ANALYSIS", `Mesh expanded: +${Math.floor(rnd(12, 22))}% coverage area. Relay path updated.`),
+      makeLog("MANUAL", `[OPERATOR] ${newId} deployed. survivor search in Sector 7G.`),
+      makeLog("COT", `CoT: Integrating new node ${newId}. Optimizing mesh...`),
+      makeLog("ANALYSIS", `Grid expansion verified. +18% signal redundancy.`)
     );
 
     setTimeout(() => set({ flashDeploy: false }), 800);
-    setTimeout(() => set((s) => { const n = new Set(s.newIds); n.delete(newId); return { newIds: n }; }), 3000);
+    setTimeout(() => set((s) => { 
+      const n = new Set(s.newIds); n.delete(newId); 
+      return { newIds: n }; 
+    }), 3000);
   },
 
-  // ─── RECALL UNIT ──────────────────────────────────────────────────────────
+  // Recall protocol with CoT-style self-healing
   recallUnit: (id) => {
-    const { drones, recalling, activeDrone, pushLog } = get();
-    const drone = drones.find((d) => d.id === id);
-    if (!drone || recalling.has(id)) return;
+    const { drones, recalling, pushLog } = get();
+    const recalled = drones.find((d) => d.id === id);
+    if (!recalled || recalling.has(id)) return;
 
     set((s) => ({ recalling: new Set([...s.recalling, id]) }));
-
-    pushLog(makeLog("RECALL", `[HUMAN] RECALL issued: ${id} (${drone.name}). Battery: ${drone.battery}%. RTB initiated.`));
+    pushLog(makeLog("RECALL", `[HUMAN] RTB order issued to ${id}. Swapping to recovery mode.`));
 
     setTimeout(() => {
-      set((s) => {
-        const remaining = s.drones.filter((d) => d.id !== id);
-        let updatedDrones = remaining;
-        let extraLogs = [];
+      const snapshot = get();
+      const current = snapshot.drones;
+      const toRemove = current.find((d) => d.id === id);
+      if (!toRemove) {
+        set((s) => ({ recalling: new Set([...s.recalling].filter((x) => x !== id)) }));
+        return;
+      }
 
-        if (drone.isRelay && remaining.length >= 2) {
-          const sorted = [...remaining].sort((a, b) => {
-            const da = Math.sqrt((a.x - drone.x) ** 2 + (a.y - drone.y) ** 2);
-            const db = Math.sqrt((b.x - drone.x) ** 2 + (b.y - drone.y) ** 2);
-            return da - db;
-          });
-          const healer = sorted[0];
-          const target = {
-            x: (drone.x + healer.x) / 2 + rnd(-8, 8),
-            y: (drone.y + healer.y) / 2 + rnd(-8, 8),
-          };
+      const remaining = current.filter((d) => d.id !== id);
+      const shouldHeal = !!toRemove.isRelay && remaining.length >= 2;
+      if (!shouldHeal) {
+        set((s) => ({
+          drones: remaining,
+          deployCount: remaining.length,
+          recalling: new Set([...s.recalling].filter((x) => x !== id)),
+          activeDrone: s.activeDrone === id ? null : s.activeDrone,
+        }));
+        return;
+      }
 
-          updatedDrones = remaining.map((d) =>
-            d.id === healer.id
-              ? { ...d, healTarget: target, isRelay: true, color: AI_CYAN, mode: "AUTO" }
-              : d
-          );
+      const healer = remaining.reduce((best, d) => {
+        if (!best) return d;
+        const da = Math.sqrt((d.x - toRemove.x) ** 2 + (d.y - toRemove.y) ** 2);
+        const db = Math.sqrt((best.x - toRemove.x) ** 2 + (best.y - toRemove.y) ** 2);
+        return da < db ? d : best;
+      }, null);
 
-          const linkKey = `${healer.id}-heal`;
-          const newHealLinks = new Set([...s.healingLinks, linkKey]);
+      if (!healer) {
+        set((s) => ({
+          drones: remaining,
+          deployCount: remaining.length,
+          recalling: new Set([...s.recalling].filter((x) => x !== id)),
+          activeDrone: s.activeDrone === id ? null : s.activeDrone,
+        }));
+        return;
+      }
 
-          setTimeout(() => {
-            set((st) => { const n = new Set(st.healingLinks); n.delete(linkKey); return { healingLinks: n }; });
-          }, 4000);
-          setTimeout(() => {
-            set((st) => ({ drones: st.drones.map((d) => d.id === healer.id ? { ...d, healTarget: null } : d) }));
-          }, 5000);
-          setTimeout(() => {
-            get().pushLog(makeLog("HEAL", `SELF-HEAL COMPLETE: ${healer.id} reached gap position. Mesh signal restored. Coverage: ${Math.floor(rnd(94, 100))}%.`));
-          }, 4200);
+      const target = {
+        x: (toRemove.x + healer.x) / 2 + rnd(-5, 5),
+        y: (toRemove.y + healer.y) / 2 + rnd(-5, 5),
+      };
 
-          extraLogs = [
-            makeLog("COT", `CoT: ${id} removed. Analyzing coverage gap at (${drone.x.toFixed(0)},${drone.y.toFixed(0)})...`),
-            makeLog("COT", `CoT: Nearest relay candidate: ${healer.id} (${healer.name}). Distance: ${Math.sqrt((healer.x - drone.x) ** 2 + (healer.y - drone.y) ** 2).toFixed(1)} units.`),
-            makeLog("DECISION", `AI: Repositioning ${healer.id} → gap sector. Promoting to RELAY node.`),
-            makeLog("ACTION", `Transmitting new waypoint to ${healer.id}. ETA: ${Math.floor(rnd(18, 40))}s.`),
-          ];
+      const linkKey = `${healer.id}-heal-${id}`;
 
-          const newRecalling = new Set(s.recalling);
-          newRecalling.delete(id);
+      set((s) => ({
+        drones: remaining.map((d) =>
+          d.id === healer.id
+            ? { ...d, healTarget: target, isRelay: true, color: AI_CYAN, mode: "AUTO" }
+            : d
+        ),
+        deployCount: remaining.length,
+        recalling: new Set([...s.recalling].filter((x) => x !== id)),
+        healingLinks: new Set([...s.healingLinks, linkKey]),
+        activeDrone: s.activeDrone === id ? null : s.activeDrone,
+        log: [
+          ...s.log,
+          makeLog("COT", `CoT: Critical relay ${id} lost. Coverage gap detected.`),
+          makeLog("DECISION", `AI: Rerouting ${healer.id} to maintain mesh coverage.`),
+          makeLog("ACTION", `Uploading new flight plan to ${healer.id}...`),
+        ],
+      }));
 
-          return {
-            drones: updatedDrones, deployCount: remaining.length,
-            recalling: newRecalling, healingLinks: newHealLinks,
-            activeDrone: s.activeDrone === id ? null : s.activeDrone,
-            log: [...s.log, ...extraLogs],
-          };
-        } else {
-          extraLogs = [
-            makeLog("COT", `CoT: ${id} removed. Non-relay unit — no coverage gap detected.`),
-            makeLog("ANALYSIS", `Mesh integrity maintained. ${remaining.length} nodes active.`),
-          ];
-          const newRecalling = new Set(s.recalling);
-          newRecalling.delete(id);
-          return {
-            drones: updatedDrones, deployCount: remaining.length,
-            recalling: newRecalling,
-            activeDrone: s.activeDrone === id ? null : s.activeDrone,
-            log: [...s.log, ...extraLogs],
-          };
-        }
-      });
+      setTimeout(() => {
+        const st = get();
+        if (!st.healingLinks.has(linkKey)) return;
+        st.pushLog(makeLog("HEAL", `SELF-HEAL COMPLETE: ${healer.id} has filled the gap. Mesh integrity optimal.`));
+        set((s) => ({
+          healingLinks: new Set([...s.healingLinks].filter((k) => k !== linkKey)),
+          drones: s.drones.map((d) => (d.id === healer.id ? { ...d, healTarget: null } : d)),
+        }));
+      }, 4200);
     }, 1200);
   },
 
-  // ─── TOGGLE MODE (AUTO ↔ MANUAL) ──────────────────────────────────────────
+  // Hybrid control
   toggleMode: (id) => {
     const { drones, pushLog } = get();
     const drone = drones.find((d) => d.id === id);
@@ -220,30 +246,18 @@ export const useFleetStore = create((set, get) => ({
     }));
     pushLog(makeLog(
       newMode === "MANUAL" ? "MANUAL" : "ACTION",
-      `${id} mode → ${newMode}. ${newMode === "MANUAL" ? "Human operator assumed control." : "Returned to AI autonomy."}`,
+      `${id} switched to ${newMode} mode.`
     ));
   },
 
-  // ─── SUBMIT INTEL ─────────────────────────────────────────────────────────
   submitIntel: () => {
-    const { intelText, drones, pushLog } = get();
+    const { intelText, pushLog } = get();
     if (!intelText.trim()) return;
     pushLog(
       makeLog("PROMPT", intelText.trim()),
-      makeLog("COT", `CoT: Processing operator intel. Cross-referencing with swarm telemetry, thermal data, and grid map...`),
-      makeLog("ACTION", `Intel logged. Adjusting patrol priorities for ${drones.length} active units.`),
+      makeLog("COT", `CoT: Cross-referencing intel with satellite imagery...`),
+      makeLog("ACTION", `Search parameters updated based on human input.`)
     );
     set({ intelText: "" });
-  },
-
-  // ─── UPDATE TELEMETRY (WebSocket-ready hook) ──────────────────────────────
-  // Call this from a WebSocket onmessage handler: store.updateTelemetry(payload)
-  updateTelemetry: (payload) => {
-    // payload: { id, battery, alt, spd, sig, x, y }
-    set((s) => ({
-      drones: s.drones.map((d) =>
-        d.id === payload.id ? { ...d, ...payload } : d
-      ),
-    }));
   },
 }));

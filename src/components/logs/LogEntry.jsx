@@ -19,9 +19,10 @@ const MSG_COLOR = (type) => {
 export default function LogEntry({ item }) {
   const meta   = TYPE_META[item.type] ?? TYPE_META.INFO;
   const hasBox = !!meta.bg && meta.bg !== "transparent";
+  const MotionDiv = motion.div;
 
   return (
-    <motion.div
+    <MotionDiv
       initial={{ opacity:0, y:10, x: item.type === "MANUAL" || item.type === "RECALL" ? -6 : 4 }}
       animate={{ opacity:1, y:0, x:0 }}
       transition={{ duration:0.3, ease:"easeOut" }}
@@ -38,6 +39,6 @@ export default function LogEntry({ item }) {
         {item.type}:
       </span>
       <span style={{ color: MSG_COLOR(item.type) }}>{item.msg}</span>
-    </motion.div>
+    </MotionDiv>
   );
 }

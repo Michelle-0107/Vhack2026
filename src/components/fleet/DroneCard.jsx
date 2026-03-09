@@ -17,6 +17,8 @@ export default function DroneCard({ drone, active, isNew, isRecalling, onSelect,
   const cardRef = useRef(null); // Reference for scrolling
   const sigColor = SIG_COLOR[drone.sig] ?? "#666";
   const isManual = drone.mode === "MANUAL";
+  const MotionDiv = motion.div;
+  const MotionButton = motion.button;
 
   // Navigation Logic: Smoothly scroll this card into the sidebar view when selected
   useEffect(() => {
@@ -35,7 +37,7 @@ export default function DroneCard({ drone, active, isNew, isRecalling, onSelect,
       : isNew ? HUMAN_MAG : "rgba(0,245,255,0.12)";
 
   return (
-    <motion.div
+    <MotionDiv
       ref={cardRef}
       layout
       initial={isNew ? { opacity: 0, x: -50, scale: 0.9 } : false}
@@ -84,10 +86,10 @@ export default function DroneCard({ drone, active, isNew, isRecalling, onSelect,
         {[
           { icon: <Zap size={8} />, k: "ALT", v: `${drone.alt}M` },
           { icon: <Gauge size={8} />, k: "SPD", v: `${drone.spd}KM` },
-          { icon: <Signal size={8} />, k: "SIG", v: drone.sig.slice(0, 5) },
-        ].map(({ icon, k, v }) => (
+          { icon: <Signal size={8} />, k: "SIG", v: drone.sig.slice(0, 5), c: sigColor },
+        ].map(({ icon, k, v, c }) => (
           <div key={k} style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 8, color: "#2a6060" }}>
-            {icon} {k}: <span style={{ color: "#6ab0c0" }}>{v}</span>
+            {icon} {k}: <span style={{ color: c ?? "#6ab0c0" }}>{v}</span>
           </div>
         ))}
       </div>
@@ -107,14 +109,14 @@ export default function DroneCard({ drone, active, isNew, isRecalling, onSelect,
           ))}
         </div>
 
-        <motion.button
+        <MotionButton
           whileTap={{ scale: 0.9 }}
           onClick={e => { e.stopPropagation(); !isRecalling && onRecall(drone.id); }}
           style={{ padding: "2px 9px", fontSize: 8, background: `rgba(255,170,0,0.08)`, border: `1px solid ${WARN_AMB}44`, color: WARN_AMB, borderRadius: 3, cursor: "pointer" }}
         >
           <RotateCcw size={8} style={{ marginRight: 4, display: 'inline' }} /> RECALL
-        </motion.button>
+        </MotionButton>
       </div>
-    </motion.div>
+    </MotionDiv>
   );
 }

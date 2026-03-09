@@ -12,9 +12,10 @@ import { AI_CYAN, HUMAN_MAG } from "@/lib/constants";
  */
 export default function OverrideCursor({ x, y, isManual }) {
   const c = isManual ? HUMAN_MAG : AI_CYAN;
+  const MotionDiv = motion.div;
 
   return (
-    <motion.div
+    <MotionDiv
       initial={{ opacity:0, scale:0.3 }}
       animate={{ opacity:1, scale:1 }}
       transition={{ type:"spring", stiffness:320, damping:22 }}
@@ -41,6 +42,6 @@ export default function OverrideCursor({ x, y, isManual }) {
       }}>
         {isManual ? "MANUAL OVERRIDE" : "AI CONTROL"}
       </div>
-    </motion.div>
+    </MotionDiv>
   );
 }

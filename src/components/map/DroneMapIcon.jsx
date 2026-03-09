@@ -14,6 +14,7 @@ import { AI_CYAN, HUMAN_MAG, CRIT_RED } from "@/lib/constants";
  */
 export default function DroneMapIcon({ drone, isActive, isNew, isRecalling, onClick }) {
   const c        = drone.mode === "MANUAL" ? HUMAN_MAG : drone.color ?? AI_CYAN;
+  const MotionDiv = motion.div;
   const glowStr  = isRecalling
     ? `0px 0px 14px ${CRIT_RED}`
     : isActive
@@ -21,7 +22,7 @@ export default function DroneMapIcon({ drone, isActive, isNew, isRecalling, onCl
       : `0px 0px 4px ${c}88`;
 
   return (
-    <motion.div
+    <MotionDiv
       key={drone.id}
       initial={isNew ? { opacity:0, scale:0 } : false}
       animate={isRecalling ? { opacity:0.3, scale:0.7, rotate:15 } : { opacity:1, scale:1, rotate:0 }}
@@ -71,6 +72,6 @@ export default function DroneMapIcon({ drone, isActive, isNew, isRecalling, onCl
       }}>
         {drone.id}{drone.mode === "MANUAL" ? " [M]" : ""}
       </div>
-    </motion.div>
+    </MotionDiv>
   );
 }
