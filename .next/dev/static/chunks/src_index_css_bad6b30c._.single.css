@@ -1,0 +1,100 @@
+/* [project]/src/index.css [app-client] (css) */
+:root {
+  --lightningcss-light: ;
+  --lightningcss-dark: initial;
+  color-scheme: dark;
+  color: #ffffffde;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #000;
+  font-family: Share Tech Mono, monospace, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+  overflow: hidden;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+@keyframes blink {
+  0%, 100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: .2;
+  }
+}
+
+@keyframes sweep {
+  0% {
+    transform: rotate(0);
+  }
+
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes gapWarning {
+  0%, 100% {
+    opacity: .6;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: .1;
+    transform: scale(1.4);
+  }
+}
+
+@keyframes healPulse {
+  0% {
+    stroke-dashoffset: 0;
+  }
+
+  100% {
+    stroke-dashoffset: -18px;
+  }
+}
+
+@keyframes pulseRing {
+  0% {
+    opacity: 1;
+    stroke-width: 2px;
+    transform: scale(.5);
+  }
+
+  100% {
+    opacity: 0;
+    stroke-width: .5px;
+    transform: scale(3.5);
+  }
+}
+
+@keyframes deployBurst {
+  0% {
+    background: #0f86;
+    transform: scale(.95);
+  }
+
+  50% {
+    transform: scale(1.02);
+  }
+
+  100% {
+    background: #00ff8817;
+    transform: scale(1);
+  }
+}
+
+/*# sourceMappingURL=src_index_css_bad6b30c._.single.css.map*/
