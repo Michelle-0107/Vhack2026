@@ -2,10 +2,12 @@
 import { useRef, useEffect } from "react";
 import { AnimatePresence } from "framer-motion";
 import { Send, RefreshCw, Link2, ShieldOff, Lock, Brain } from "lucide-react";
+import { useChat } from "ai/react";
 import { useFleetStore } from "@/store/useFleetStore";
 import LogEntry    from "./LogEntry";
 import SignalChart from "./SignalChart";
 import { AI_CYAN, HUMAN_MAG, OK_GREEN, CRIT_RED, WARN_AMB } from "@/lib/constants";
+import { makeLog } from "@/lib/utils";
 
 const ACTION_BTNS = [
   { l:"RE-CALIBRATE",   icon:<RefreshCw  size={10}/>, c:AI_CYAN   },
@@ -20,18 +22,34 @@ const ACTION_BTNS = [
  */
 export default function AIIntelligenceHub() {
   const log          = useFleetStore(s => s.log);
+  const pushLog      = useFleetStore(s => s.pushLog);
   const sigBars      = useFleetStore(s => s.sigBars);
   const latency      = useFleetStore(s => s.latency);
   const recalling    = useFleetStore(s => s.recalling);
-  const intelText    = useFleetStore(s => s.intelText);
-  const setIntelText = useFleetStore(s => s.setIntelText);
-  const submitIntel  = useFleetStore(s => s.submitIntel);
+  
+  // Vercel AI SDK hook for streaming chat
+  const { messages, input, handleInputChange, handleSubmit, isLoading } = useChat({
+    api: "/api/chat",
+    onFinish: (message) => {
+      // Add AI response to the fleet store log for persistence/display
+      pushLog(makeLog("COT", `AI: ${message.content}`));
+    },
+  });
+
+  // Intercept form submission to add user input to log immediately
+  const onSubmit = (e) => {
+    e.preventDefault();
+    if (!input.trim()) return;
+    pushLog(makeLog("PROMPT", `[OPERATOR]: ${input}`));
+    handleSubmit(e);
+  };
 
   const logRef = useRef(null);
 
+  // Auto-scroll log
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
-  }, [log]);
+  }, [log, messages]); // Scroll on new log entries or streaming messages
 
   const healing = recalling.size > 0;
 
@@ -47,9 +65,11 @@ export default function AIIntelligenceHub() {
             AI INTELLIGENCE HUB
           </span>
           <div style={{ display:"flex", alignItems:"center", gap:5 }}>
-            <div style={{ width:5, height:5, borderRadius:"50%", background:OK_GREEN, animation:"blink 1.2s infinite", boxShadow:`0 0 5px ${OK_GREEN}` }} />
-            <Brain size={10} color="#ffdd55" />
-            <span style={{ fontSize:7, color:"#ffdd55", letterSpacing:1 }}>LLAMA-3.2 ACTIVE</span>
+            <div style={{ width:5, height:5, borderRadius:"50%", background:isLoading ? WARN_AMB : OK_GREEN, animation: isLoading ? "none" : "blink 1.2s infinite", boxShadow:`0 0 5px ${isLoading ? WARN_AMB : OK_GREEN}` }} />
+            <Brain size={10} color={isLoading ? WARN_AMB : "#ffdd55"} />
+            <span style={{ fontSize:7, color:isLoading ? WARN_AMB : "#ffdd55", letterSpacing:1 }}>
+              {isLoading ? "PROCESSING..." : "LLAMA-3.2 ACTIVE"}
+            </span>
           </div>
         </div>
       </div>
@@ -80,11 +100,11 @@ export default function AIIntelligenceHub() {
       {/* Intel input */}
       <div style={{ padding:"8px 13px", borderBottom:`1px solid ${AI_CYAN}0e` }}>
         <div style={{ fontSize:9, letterSpacing:2, color:`${AI_CYAN}55`, marginBottom:5 }}>HUMAN INTEL INPUT</div>
-        <div style={{ position:"relative" }}>
+        <form onSubmit={onSubmit} style={{ position:"relative" }}>
           <textarea
-            value={intelText}
-            onChange={e => setIntelText(e.target.value)}
-            onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitIntel(); }}}
+            value={input}
+            onChange={handleInputChange}
+            onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { onSubmit(e); }}}
             placeholder="Enter field intel, survivor sighting, tactical override..."
             rows={3}
             style={{
@@ -94,17 +114,19 @@ export default function AIIntelligenceHub() {
             }}
           />
           <button
-            onClick={submitIntel}
+            type="submit"
+            disabled={isLoading}
             style={{
               position:"absolute", bottom:7, right:7, display:"flex", alignItems:"center", gap:4,
               background:`rgba(0,245,255,0.12)`, border:`1px solid ${AI_CYAN}44`, color:AI_CYAN,
               fontFamily:"'Share Tech Mono',monospace", fontSize:8, padding:"3px 8px",
-              borderRadius:3, cursor:"pointer", letterSpacing:1,
+              borderRadius:3, cursor:isLoading ? "wait" : "pointer", letterSpacing:1,
+              opacity: isLoading ? 0.5 : 1
             }}
           >
-            <Send size={9} /> SUBMIT
+            <Send size={9} /> {isLoading ? "SENDING..." : "SUBMIT"}
           </button>
-        </div>
+        </form>
         <div style={{ fontSize:7, color:`${AI_CYAN}28`, marginTop:3 }}>ENTER to submit · SHIFT+ENTER newline</div>
       </div>
 
@@ -125,6 +147,15 @@ export default function AIIntelligenceHub() {
         <div ref={logRef} style={{ flex:1, overflowY:"auto", display:"flex", flexDirection:"column", gap:4 }}>
           <AnimatePresence initial={false}>
             {log.map(item => <LogEntry key={item.id} item={item} />)}
+            {/* Show streaming message as a temporary log entry if active */}
+            {messages.length > 0 && messages[messages.length - 1].role === 'assistant' && (
+               <LogEntry item={{ 
+                 id: "streaming", 
+                 time: new Date().toLocaleTimeString('en-US', {hour12:false}), 
+                 type: "COT", 
+                 msg: `AI: ${messages[messages.length - 1].content}${isLoading ? ' █' : ''}` 
+               }} />
+            )}
           </AnimatePresence>
           <div style={{ height:4 }} />
         </div>
