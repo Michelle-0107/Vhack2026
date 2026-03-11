@@ -3,9 +3,9 @@ Mission Manager - Coordinates overall mission lifecycle, from briefing through
 task dispatch to completion reporting.
 """
 from vhack_engine.agents.command_agent import CommandAgent
-from vhack_engine.services.drone_manager import DroneManager
 from vhack_engine.simulation.disaster_model import DisasterModel
 from vhack_engine.mcp.client import MCPToolLoader
+from vhack_engine.mcp.discovery import DroneDiscovery
 from vhack_engine.mcp import server as mcp_server
 
 
@@ -17,7 +17,6 @@ class MissionManager:
 
     def __init__(self):
         self.command_agent = CommandAgent()
-        self.drone_manager = DroneManager()
         self.tool_loader = MCPToolLoader(use_subprocess=False)  # Direct integration
         self.model: DisasterModel | None = None
         self.active = False
@@ -36,23 +35,19 @@ class MissionManager:
         # CRITICAL: Link simulation model to MCP server for direct control
         mcp_server.set_simulation_model(self.model)
         
-        # CRITICAL: Discover drones from the simulation
-        self.drone_manager.discovery.set_simulation_model(self.model)
-        discovered_drones = self.drone_manager.discovery.discover()
+        # CRITICAL: Discover drones from the simulation and initialize swarm_data
+        discovery = DroneDiscovery(self.model)
+        discovered_drones = discovery.discover()
         
-        # Register discovered drones with DroneManager
+        # Initialize swarm_data in MCP server with discovered drones
         for drone_info in discovered_drones:
-            self.drone_manager.register(
-                drone_info["id"],
-                {
-                    "position": drone_info["position"],
-                    "battery": drone_info["battery"],
-                    "status": drone_info["status"]
-                }
-            )
-        
-        # Sync MCP server with DroneManager state
-        mcp_server.set_drone_manager(self.drone_manager)
+            mcp_server.swarm_data[drone_info["id"]] = {
+                "x": drone_info["position"][0],
+                "y": drone_info["position"][1],
+                "battery": drone_info["battery"],
+                "role": "searcher",
+                "status": drone_info["status"]
+            }
         
         # Load MCP tools for CommandAgent
         mcp_tools = self.tool_loader.load_tools()
