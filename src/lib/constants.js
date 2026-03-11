@@ -44,7 +44,7 @@ export const TYPE_META = {
 };
 
 export const INITIAL_LOG = [
-  { id: 0, time: "08:42:10", type: "SUCCESS", msg: "Llama-3.2 initialized on local NPU. MCP bridge online." },
+  { id: 0, time: "08:42:10", type: "SUCCESS", msg: "Llama-3.1 initialized on local NPU. MCP bridge online." },
   { id: 1, time: "08:42:11", type: "INFO", msg: "Scanning MCP tool registry... 14 tools registered." },
   { id: 2, time: "08:42:12", type: "ANALYSIS", msg: "Mesh topology stable. 5 nodes, 8 active relay links." },
   { id: 3, time: "08:42:16", type: "WARNING", msg: "U-04 (DELTA) battery critical: 14%. Estimated 6 min flight time." },

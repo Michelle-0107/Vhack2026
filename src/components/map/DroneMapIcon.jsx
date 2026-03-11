@@ -14,12 +14,16 @@ import { AI_CYAN, HUMAN_MAG, CRIT_RED } from "@/lib/constants";
  */
 export default function DroneMapIcon({ drone, isActive, isNew, isRecalling, onClick }) {
   const c        = drone.mode === "MANUAL" ? HUMAN_MAG : drone.color ?? AI_CYAN;
+  const isScanning = !!drone.isScanning;
+  const phase      = drone.scanPhase ?? 0;
   const MotionDiv = motion.div;
-  const glowStr  = isRecalling
-    ? `0px 0px 14px ${CRIT_RED}`
-    : isActive
-      ? `0px 0px ${isNew ? 12 : 9}px ${c}`
-      : `0px 0px 4px ${c}88`;
+  const glowStr  = isScanning
+    ? `0 0 4px var(--color-target)`
+    : (isRecalling
+        ? `0 0 14px ${CRIT_RED}`
+        : (isActive
+            ? `0 0 ${isNew ? 12 : 9}px ${c}`
+            : `0 0 4px ${c}88`));
 
   return (
     <MotionDiv
@@ -39,6 +43,36 @@ export default function DroneMapIcon({ drone, isActive, isNew, isRecalling, onCl
         filter:`drop-shadow(${glowStr})`,
       }}
     >
+      {/* Subtle radar ripples (whisper-thin dashed rings) */}
+      {isScanning && phase >= 1 && (
+        <motion.svg
+          width="36" height="36"
+          style={{
+            position: "absolute",
+            left: "50%", top: "50%",
+            transform: "translate(-50%,-50%)",
+            pointerEvents: "none",
+            mixBlendMode: "screen",
+            filter: "drop-shadow(0 0 4px var(--color-target))",
+          }}
+        >
+          {[0, 0.5, 1.0].map((delay, i) => (
+            <motion.circle
+              key={i}
+              cx="18" cy="18" r="8"
+              fill="none"
+              stroke="var(--color-target)"
+              strokeWidth="0.8"
+              strokeDasharray="2 4"
+              initial={{ scale: 0.8, opacity: 0.4 }}
+              animate={{ scale: 2.0, opacity: 0 }}
+              transition={{ duration: 2.4, delay, repeat: Infinity, ease: "easeOut" }}
+              style={{ transformOrigin: "18px 18px" }}
+            />
+          ))}
+        </motion.svg>
+      )}
+
       {/* Selection pulse ring */}
       {isActive && !isRecalling && (
         <div style={{

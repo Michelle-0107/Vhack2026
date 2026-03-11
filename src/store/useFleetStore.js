@@ -9,13 +9,12 @@ import { makeLog, rnd, clamp, initDronePhysics, droneColor } from "@/lib/utils";
 // ── Sensor mode definitions ───────────────────────────────────────────────────
 // Each mode maps to a distinct colour and detection visual style.
 // These are the four multimodal detection modes supported by the system.
-export const SENSOR_MODES = ["THERMAL", "CV", "SIGNAL", "SOUND"];
+export const SENSOR_MODES = ["THERMAL", "CV", "SIGNAL"];
 
 export const SENSOR_COLOR = {
   THERMAL: "#00f5ff", // Cyan  — heat-signature imaging
   CV:      "#00ff88", // Green — computer-vision object detection
   SIGNAL:  "#ff00cc", // Magenta — RF / phone-signal triangulation
-  SOUND:   "#ffdd00", // Yellow — acoustic / sonar detection
 };
 
 // ── Seed physics and default sensor state onto every base drone ───────────────
@@ -23,6 +22,9 @@ const seedDrones = BASE_DRONES.map((d, i) => ({
   ...initDronePhysics(d),
   // Distribute default sensor modes across the initial fleet for visual variety
   sensorMode: SENSOR_MODES[i % SENSOR_MODES.length],
+  // Tactical Recon HUD state
+  isScanning: true,
+  scanPhase: 1,
 }));
 
 export const useFleetStore = create((set, get) => ({
@@ -46,6 +48,48 @@ export const useFleetStore = create((set, get) => ({
 
   pushLog: (...entries) =>
     set((s) => ({ log: [...s.log, ...entries] })),
+
+  // ─── Start scan on all drones ───────────────────────────────────────────────
+  startScanAll: () => {
+    const { drones, pushLog } = get();
+    pushLog(makeLog("ACTION", "SYNC: Initiating swarm-wide RF → Thermal → Visual scan."));
+    drones.forEach((d) => get().startScanSequence(d.id));
+  },
+
+  // ─── Start 3-Phase Tactical Recon on a specific drone ──────────────────────
+  startScanSequence: (id) => {
+    const { drones, pushLog } = get();
+    const target = id ? drones.find((d) => d.id === id) : null;
+    if (!target) return;
+
+    // Phase 0 → Phase 1 (T+0s)
+    set((s) => ({
+      drones: s.drones.map((d) =>
+        d.id !== id ? d : { ...d, isScanning: true, scanPhase: 1 }
+      ),
+    }));
+    pushLog(makeLog("ACTION", "[T+0s] RF Scan: Triangulating electronic signal in Sector 7G..."));
+
+    // Phase 2 (T+2s)
+    setTimeout(() => {
+      set((s) => ({
+        drones: s.drones.map((d) =>
+          d.id !== id ? d : { ...d, scanPhase: 2 }
+        ),
+      }));
+      pushLog(makeLog("ACTION", "[T+2s] Thermal: Biological heat signature confirmed (37.2°C)."));
+    }, 2000);
+
+    // Phase 3 (T+4s)
+    setTimeout(() => {
+      set((s) => ({
+        drones: s.drones.map((d) =>
+          d.id !== id ? d : { ...d, scanPhase: 3 }
+        ),
+      }));
+      pushLog(makeLog("ACTION", "[T+4s] Visual ID: Target Confirmed. Confidence 99.8%."));
+    }, 4000);
+  },
 
   // ─── Mesh edge computation ────────────────────────────────────────────────
   getMeshEdges: () => {
@@ -329,6 +373,16 @@ export const useFleetStore = create((set, get) => ({
   },
 }));
 
+let __autoScanInit = false;
+if (!__autoScanInit) {
+  __autoScanInit = true;
+  setTimeout(() => {
+    try {
+      useFleetStore.getState().startScanAll();
+    } catch {}
+  }, 200);
+}
+
 // ─── Internal helper ──────────────────────────────────────────────────────────
 // Returns a brief human-readable description of each sensor mode for the log.
 function sensorModeDescription(mode) {
@@ -336,7 +390,6 @@ function sensorModeDescription(mode) {
     case "THERMAL": return "Thermal camera active — heat-signature detection enabled.";
     case "CV":      return "Computer vision active — object classification enabled.";
     case "SIGNAL":  return "RF scanning active — phone/device signal triangulation enabled.";
-    case "SOUND":   return "Acoustic array active — sonar/sound-source detection enabled.";
     default:        return "";
   }
 }

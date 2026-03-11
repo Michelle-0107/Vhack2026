@@ -5,6 +5,7 @@ import { Activity, Crosshair, RefreshCw, Radio } from "lucide-react";
 import { useFleetStore, SENSOR_COLOR, SENSOR_MODES } from "@/store/useFleetStore";
 import TopoGrid    from "./TopoGrid";
 import ThermalZone from "./ThermalZone";
+import CommanderView from "./CommanderView";
 import DroneMapIcon  from "./DroneMapIcon";
 import OverrideCursor from "./OverrideCursor";
 import RelayLink      from "./RelayLink";
@@ -46,15 +47,14 @@ function SensorOverlayLayer({ drones }) {
 // ── Sensor Sub-components ─────────────────────────────────────────────────────
 
 function DroneSensor({ drone }) {
-  const { x, y } = drone;
+  const { x, y, isScanning, scanPhase } = drone;
 
   return (
     <g transform={`translate(${x}, ${y})`}>
-      {/* Render specific tactical animations for SIGNAL, SOUND, and THERMAL modes */}
+      {/* Render specific tactical animations for SIGNAL and THERMAL modes */}
       {/* CV box is intentionally removed to declutter the view */}
       <SensorThermal />
       <SensorSignal color={SENSOR_COLOR.SIGNAL} />
-      <SensorSound color={SENSOR_COLOR.SOUND} />
     </g>
   );
 }
@@ -86,19 +86,6 @@ function SensorSignal({ color }) {
   );
 }
 
-function SensorSound({ color }) {
-  // Concentric sonar ripples with staggered start times (Yellow)
-  return (
-    <g>
-      {[0, 1].map((i) => (
-        <circle key={i} r="1" fill="none" stroke={color} strokeWidth="0.15">
-          <animate attributeName="r" values="1;14" dur="2.5s" begin={`${i * 1.2}s`} repeatCount="indefinite" />
-          <animate attributeName="opacity" values="0.6;0" dur="2.5s" begin={`${i * 1.2}s`} repeatCount="indefinite" />
-        </circle>
-      ))}
-    </g>
-  );
-}
 
 // ── Sensor mode HUD legend ────────────────────────────────────────────────────
 // Displays which sensor modes are currently active across the fleet.
@@ -113,7 +100,6 @@ function SensorModeLegend({ drones }) {
     THERMAL: "THERMAL",
     CV:      "COMP-VIS",
     SIGNAL:  "RF-SIG",
-    SOUND:   "ACOUSTIC",
   };
 
   return (
@@ -155,6 +141,8 @@ export default function MapGrid() {
   const cycleSensorMode = useFleetStore((s) => s.cycleSensorMode);
   const tick_update     = useFleetStore((s) => s.tick_update);
   const getMeshEdges    = useFleetStore((s) => s.getMeshEdges);
+  const startScanSequence = useFleetStore((s) => s.startScanSequence);
+  const startScanAll      = useFleetStore((s) => s.startScanAll);
 
   const mapRef = useRef(null);
 
@@ -308,6 +296,9 @@ export default function MapGrid() {
           </AnimatePresence>
         </div>
 
+        {/* Layer 5.5 — Commander HUD overlayer (hex · ripples · shutter) */}
+        <CommanderView drones={drones} showEdges={false} showCounts={false} showGlobalRadar={false} />
+
         {/* Layer 6 — Manual-override cursor ring */}
         {activeD && (
           <OverrideCursor
@@ -397,7 +388,13 @@ export default function MapGrid() {
 
         {/* SYNC: Trigger a mesh re-sync with the local Llama node */}
         <button
-          onClick={() => console.log("Syncing mesh with Local Llama-3.2 NPU...")}
+          onClick={() => {
+            if (activeDrone) {
+              startScanSequence(activeDrone);
+            } else {
+              startScanAll();
+            }
+          }}
           style={{
             background: AI_CYAN,
             color: "#000", fontWeight: 700,

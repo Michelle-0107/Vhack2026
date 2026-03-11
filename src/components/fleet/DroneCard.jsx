@@ -81,20 +81,59 @@ export default function DroneCard({ drone, active, isNew, isRecalling, onSelect,
 
       <BatteryBar value={drone.battery} />
 
-      {/* Telemetry Data */}
-      <div style={{ display: "flex", gap: 10, marginTop: 6 }}>
-        {[
-          { icon: <Zap size={8} />, k: "ALT", v: `${drone.alt}M` },
-          { icon: <Gauge size={8} />, k: "SPD", v: `${drone.spd}KM` },
-          { icon: <Signal size={8} />, k: "SIG", v: drone.sig.slice(0, 5), c: sigColor },
-        ].map(({ icon, k, v, c }) => (
-          <div key={k} style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 8, color: "#2a6060" }}>
-            {icon} {k}: <span style={{ color: c ?? "#6ab0c0" }}>{v}</span>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
+        <div style={{ display: "flex", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 8, color: "#2a6060" }}>
+            <Zap size={8} /> ALT: <span style={{ color: "#6ab0c0" }}>{drone.alt}M</span>
           </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 8, color: "#2a6060" }}>
+            <Gauge size={8} /> SPD: <span style={{ color: "#6ab0c0" }}>{drone.spd}KM</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 8, color: "#2a6060" }}>
+            <Signal size={8} /> SIG: <span style={{ color: sigColor }}>{drone.sig.slice(0, 5)}</span>
+          </div>
+        </div>
+        {drone.isScanning && (drone.scanPhase ?? 0) >= 3 && (
+          <span style={{
+            fontSize: 8,
+            color: HUMAN_MAG,
+            letterSpacing: 1,
+            textTransform: "uppercase",
+            filter: `drop-shadow(0 0 6px ${HUMAN_MAG})`,
+          }}>
+            TARGET LOCKED
+          </span>
+        )}
+      </div>
+
+      <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+        {[
+          { key: "RF",   active: (drone.isScanning && (drone.scanPhase ?? 0) >= 1), color: HUMAN_MAG },
+          { key: "THER", active: (drone.isScanning && (drone.scanPhase ?? 0) >= 2), color: "#ff7a00" },
+          { key: "CV",   active: (drone.isScanning && (drone.scanPhase ?? 0) >= 3), color: "#00ff88" },
+        ].map(({ key, active, color }) => (
+          <motion.div
+            key={key}
+            initial={{ opacity: active ? 0.6 : 0.15 }}
+            animate={{ opacity: active ? [0.6, 1, 0.6] : 0.15 }}
+            transition={{ duration: 0.9, repeat: Infinity }}
+            style={{
+              padding: "2px 6px",
+              borderRadius: 3,
+              border: `1px solid ${color}`,
+              color,
+              fontSize: 7,
+              fontFamily: "'Share Tech Mono',monospace",
+              boxShadow: active ? `0 0 8px ${color}` : "none",
+              background: active ? "rgba(0,0,0,0.5)" : "transparent",
+              mixBlendMode: "screen",
+            }}
+          >
+            {key}
+          </motion.div>
         ))}
       </div>
 
-      {/* Controls */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 7 }}>
         <div
           onClick={e => { e.stopPropagation(); !isRecalling && onToggleMode(drone.id); }}

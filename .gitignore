@@ -28,3 +28,10 @@ node_modules/
 dist/
 .env
 *.log
+
+# Next.js build output
+.next/
+out/
+
+node_modules/
+.next/

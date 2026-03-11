@@ -1,5 +1,5 @@
 "use client";
-import { AnimatePresence } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import { PlusCircle } from "lucide-react";
 import DroneCard from "./DroneCard";
 import { useFleetStore } from "@/store/useFleetStore";
@@ -21,6 +21,10 @@ export default function SwarmRegistry() {
   const toggleMode = useFleetStore(s => s.toggleMode);
   const activeDrone = useFleetStore(s => s.activeDrone); // Standardized name
   const setActiveDrone = useFleetStore(s => s.setActiveDrone);
+  const phaseOfActive = (() => {
+    const d = drones.find(x => x.id === activeDrone);
+    return d ? d.scanPhase ?? 0 : 0;
+  })();
 
   const atCap = deployCount >= MAX_FLEET;
 
@@ -69,6 +73,7 @@ export default function SwarmRegistry() {
             </div>
           ))}
         </div>
+
       </div>
 
       {/* Scrollable Drone List */}
