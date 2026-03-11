@@ -8,32 +8,14 @@ import math
 # Initialize the Server
 mcp = FastMCP("BeaconNetServer")
 
-# --- SHARED STATE (will be synchronized with DroneManager) ---
+# --- SHARED STATE ---
 swarm_data = {}
 known_dead_zones = []
 environmental_hazards = {"gas_leak": (15, 15), "fire": (45, 25)}
 human_intelligence_database = "No manual intelligence provided yet."
 
-# Reference to DroneManager (set by MCPServer.initialize())
-_drone_manager = None
 # Reference to MESA DisasterModel (for direct simulation control)
 _simulation_model = None
-
-
-def set_drone_manager(manager):
-    """Link the DroneManager to synchronize state with swarm_data."""
-    global _drone_manager, swarm_data
-    _drone_manager = manager
-    # Initialize swarm_data from DroneManager
-    if manager:
-        for drone in manager.list_drones():
-            swarm_data[drone["id"]] = {
-                "x": drone["position"][0],
-                "y": drone["position"][1],
-                "battery": drone["battery"],
-                "role": "searcher",
-                "status": drone.get("status", "idle")
-            }
 
 
 def set_simulation_model(model):
@@ -82,9 +64,6 @@ def get_battery_status(drone_id: str) -> str:
         else:
             battery = swarm_data[drone_id]['battery']
         
-        # Sync with DroneManager
-        if _drone_manager:
-            _drone_manager.update_battery(drone_id, battery)
         return f"{drone_id} battery is at {battery:.1f}%."
     return "Drone not found."
 
@@ -96,10 +75,6 @@ def move_to(drone_id: str, x: int, y: int) -> str:
         # Update swarm_data dict
         swarm_data[drone_id]["x"] = x
         swarm_data[drone_id]["y"] = y
-        
-        # Sync with DroneManager
-        if _drone_manager:
-            _drone_manager.update_position(drone_id, x, y)
         
         # CRITICAL: Actually move the MESA drone in simulation
         drone_agent = _get_drone_agent(drone_id)
@@ -212,9 +187,6 @@ def check_signal_network(drone_id: str) -> str:
 def deploy_relay(drone_id: str, x: int, y: int) -> str:
     """Deploys a new relay drone to heal network dead zones."""
     swarm_data[drone_id] = {"x": x, "y": y, "battery": 100, "role": "relay", "status": "active"}
-    # Register with DroneManager
-    if _drone_manager:
-        _drone_manager.register(drone_id, {"position": [x, y], "battery": 100, "role": "relay"})
     return f"SELF-HEALING SUCCESS: Relay {drone_id} deployed at ({x}, {y})."
 
 
@@ -229,11 +201,6 @@ def swap_drones(tired_drone_id: str, fresh_drone_id: str) -> str:
         swarm_data[tired_drone_id]["y"] = 0
         swarm_data[fresh_drone_id]["x"] = target_x
         swarm_data[fresh_drone_id]["y"] = target_y
-        
-        # Sync with DroneManager
-        if _drone_manager:
-            _drone_manager.update_position(tired_drone_id, 0, 0)
-            _drone_manager.update_position(fresh_drone_id, target_x, target_y)
         
         return f"ROTATION COMPLETE: {fresh_drone_id} took over for {tired_drone_id}."
     return "Drones not found."
@@ -298,10 +265,6 @@ class MCPServer:
     def register_tools(self):
         """Tools are registered via @mcp.tool() decorators."""
         pass  # Tools auto-registered by FastMCP decorators
-    
-    def initialize(self, drone_manager):
-        """Initialize with DroneManager for state synchronization."""
-        set_drone_manager(drone_manager)
     
     def start(self):
         """Start the MCP server."""
