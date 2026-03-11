@@ -26,12 +26,24 @@ class DroneAgent(Agent):
         """Move drone to the specified grid coordinates."""
         self.model.grid.move_agent(self, (x, y))
 
-    def scan(self) -> list:
-        """Return survivor agents at the current cell."""
+    def scan(self, radius: int = 2) -> list:
+        """Return survivor agents within scan radius of drone position."""
         from vhack_engine.simulation.survivor_agent import SurvivorAgent
         self.scanned_cells.add(self.pos)
-        cellmates = self.model.grid.get_cell_list_contents([self.pos])
-        return [a for a in cellmates if isinstance(a, SurvivorAgent)]
+        
+        # Scan all cells within radius
+        survivors = []
+        x, y = self.pos
+        for dx in range(-radius, radius + 1):
+            for dy in range(-radius, radius + 1):
+                scan_pos = (x + dx, y + dy)
+                # Check if position is within grid bounds
+                if (0 <= scan_pos[0] < self.model.grid.width and 
+                    0 <= scan_pos[1] < self.model.grid.height):
+                    cellmates = self.model.grid.get_cell_list_contents([scan_pos])
+                    survivors.extend([a for a in cellmates if isinstance(a, SurvivorAgent)])
+        
+        return survivors
 
     def _drain_battery(self):
         """Reduce battery level by the per-step drain rate."""
