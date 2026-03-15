@@ -1,5 +1,9 @@
 """
 Command Agent - Top-level AI agent responsible for orchestrating the drone fleet.
+Uses LangChain to reason about mission state and dispatch tool calls via MCP.
+"""
+from vhack_engine.llm.llm_client import OllamaClient
+from vhack_engine.mcp.tool_registry import ToolRegistry
 Uses LangChain with Ollama to reason about mission state and dispatch tool calls via MCP.
 """
 import asyncio

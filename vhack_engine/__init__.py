@@ -8,12 +8,13 @@ Package structure:
   tools/       - MCP-compatible drone action tools
   simulation/  - Mesa-based disaster simulation (DisasterModel, DroneAgent)
   environment/ - Grid maps and sector definitions
-  services/    - MissionManager, FleetOptimizer
+  services/    - DroneManager, MissionManager, FleetOptimizer
   database/    - MongoDB persistence layer
   config/      - Settings and model configuration
   utils/       - Logging and shared helpers
 """
+from vhack_engine.services.drone_manager import DroneManager
 from vhack_engine.services.mission_manager import MissionManager
 from vhack_engine.simulation.disaster_model import DisasterModel
 
-__all__ = ["MissionManager", "DisasterModel"]
+__all__ = ["DroneManager", "MissionManager", "DisasterModel"]
