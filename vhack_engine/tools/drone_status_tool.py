@@ -1,31 +1,38 @@
-"""
-Drone Status Tool - MCP tool that returns full status of a drone including
-position, battery, and current task.
-"""
-
+from vhack_engine.database.database import Database
 
 class DroneStatusTool:
-    """Returns comprehensive status information for a drone."""
+    """Returns comprehensive status information for a drone or all drones."""
 
     name = "get_drone_status"
-    description = "Get the full status of a drone: position, battery, and current task."
+    description = "Get drone status. Provide 'drone_id' for one, or leave empty to list ALL drones."
 
     def run(self, params: dict) -> dict:
         """
-        Retrieve drone status.
-
-        Args:
-            params: {"drone_id": str}
-
-        Returns:
-            Status dict with position, battery_pct, and current_task.
+        Fetch real-time status from MongoDB.
         """
         drone_id = params.get("drone_id")
-        # TODO: fetch from DroneManager
-        return {
-            "drone_id": drone_id,
-            "position": [0, 0],
-            "battery_pct": 100.0,
-            "current_task": None,
-            "status": "idle",
-        }
+        db = Database()
+        
+        try:
+            db.connect()
+            
+            # 💡 逻辑分叉：
+            if drone_id:
+                # 模式 A: 查找特定无人机
+                results = db.find("drones", {"drone_id": drone_id})
+                if not results:
+                    return {"error": f"Drone {drone_id} not found in database."}
+                return results[0]
+            else:
+                # 模式 B: 查找所有无人机 (Multi-Agent 协作的核心)
+                all_drones = db.find("drones", {})
+                return {
+                    "count": len(all_drones),
+                    "drones": all_drones,
+                    "summary": f"Detected {len(all_drones)} drones in the swarm."
+                }
+                
+        except Exception as e:
+            return {"error": f"Failed to retrieve status: {str(e)}"}
+        finally:
+            db.close()
