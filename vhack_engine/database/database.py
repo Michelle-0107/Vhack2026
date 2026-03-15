@@ -90,3 +90,22 @@ class Database:
         """Close the database connection."""
         if self._client:
             self._client.close()
+
+    def update_drone_status(self, drone_id: str, update_data: dict):
+        """更新无人机实时状态 (Upsert 模式)"""
+        if self._db is None: return
+        self._db["drones"].update_one(
+            {"drone_id": drone_id},
+            {"$set": update_data},
+            upsert=True
+        )
+
+    def log_event(self, event_type: str, details: str):
+        """向黑匣子写入一条任务日志"""
+        from datetime import datetime
+        doc = {
+            "timestamp": datetime.now(),
+            "type": event_type,
+            "details": details
+        }
+        self.insert("mission_events", doc)
