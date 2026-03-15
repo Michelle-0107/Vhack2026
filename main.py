@@ -7,6 +7,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from vhack_engine.config.settings import Settings
+from vhack_engine.mcp.server import MCPServer
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from vhack_engine.services.mission_manager import MissionManager
 
 settings = Settings()
@@ -35,6 +38,8 @@ class IntelligenceReport(BaseModel):
 
 @app.on_event("startup")
 async def startup():
+    """Register all drone tools with the MCP server on startup."""
+    mcp_server.register_tools()
     """Initialize the application on startup."""
     print("[VHack API] Starting Autonomous Drone Orchestrator...")
 
