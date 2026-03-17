@@ -3,6 +3,7 @@ DroneAgent - Mesa Agent representing a single autonomous rescue drone.
 Handles movement, scanning, and battery consumption within the simulation.
 """
 from mesa import Agent
+from vhack_engine.environment.disaster_map import BASE_STATION_POS
 
 
 class DroneAgent(Agent):
@@ -20,6 +21,12 @@ class DroneAgent(Agent):
 
     def step(self):
         """Execute one simulation tick: drain battery and perform current task."""
+        if self.needs_recharge:
+            self.current_task = "return_to_base"
+            self._return_to_base_step()
+        elif self.current_task == "return_to_base" and self.pos == BASE_STATION_POS:
+            self.current_task = "idle"
+
         self._drain_battery()
 
     def move_to(self, x: int, y: int):
@@ -48,6 +55,22 @@ class DroneAgent(Agent):
     def _drain_battery(self):
         """Reduce battery level by the per-step drain rate."""
         self.battery = max(0.0, self.battery - self.battery_drain_per_step)
+
+    def _return_to_base_step(self):
+        """Move one grid step toward the fixed base station when battery is low."""
+        if self.pos is None:
+            return
+
+        base_x = max(0, min(BASE_STATION_POS[0], self.model.grid.width - 1))
+        base_y = max(0, min(BASE_STATION_POS[1], self.model.grid.height - 1))
+        x, y = self.pos
+
+        if (x, y) == (base_x, base_y):
+            return
+
+        step_x = x + (1 if base_x > x else -1 if base_x < x else 0)
+        step_y = y + (1 if base_y > y else -1 if base_y < y else 0)
+        self.move_to(step_x, step_y)
 
     @property
     def needs_recharge(self) -> bool:

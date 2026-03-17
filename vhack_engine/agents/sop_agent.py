@@ -1,27 +1,22 @@
 import autogen
 from vhack_engine.database.database import Database
+from vhack_engine.mcp import server as mcp_server
 import ollama
 
 def retrieve_sop(situation_query: str) -> str:
     """Search SOP database and cross-reference with real-time drone telemetry."""
     print(f"\n🔥 [RAG TRIGGERED] 正在為查詢生成向量並檢索 MongoDB Atlas: '{situation_query}'")
-    db = Database()
+    db = None
     try:
+        db = Database()
         db.connect()
         
         # 1. 执行向量检索 (RAG) - 查规程
         response = ollama.embeddings(model='nomic-embed-text', prompt=situation_query)
         sop_results = db.vector_search(collection="sops", query_vector=response['embedding'], limit=2)
         
-        # 2. 尝试从查询中提取无人机 ID (简单逻辑：搜索 D1 或 Drone 1)
-        # 默认查 D1，如果你的系统里有 D2，可以根据 situation_query 动态匹配
-        drone_target = "D1" 
-        if "Drone 2" in situation_query or "D2" in situation_query:
-            drone_target = "D2"
-
-        # 3. 执行基础检索 - 查实况 (Telemetry)
-        # 对应你刚在 MongoDB 手动创建的 "drones" collection
-        telemetry = db.find(collection="drones", query={"drone_id": drone_target})
+        # 2. 从当前仿真状态读取实时遥测（不再依赖可能过期的 MongoDB drones 集合）
+        live_swarm = mcp_server.swarm_data
         
         # 4. 整合返回内容
         output = "### APPLICABLE SOPs:\n"
@@ -30,12 +25,15 @@ def retrieve_sop(situation_query: str) -> str:
         else:
             output += "No specific SOP found in knowledge base."
 
-        if telemetry:
-            status = telemetry[0]
-            output += f"\n\n### REAL-TIME TELEMETRY ({drone_target}):\n"
-            output += f"- Current Battery: {status.get('battery')}% \n"
-            output += f"- Current Status: {status.get('status')} \n"
-            output += f"- Last Position: {status.get('position')}"
+        if live_swarm:
+            for drone_id in sorted(live_swarm.keys()):
+                status = live_swarm[drone_id]
+                output += f"\n\n### REAL-TIME TELEMETRY ({drone_id}):\n"
+                output += f"- Current Battery: {float(status.get('battery', 0.0)):.1f}%\n"
+                output += f"- Current Status: {status.get('status', 'idle')}\n"
+                output += f"- Last Position: {{'x': {status.get('x', 0)}, 'y': {status.get('y', 0)}}}"
+        else:
+            output += "\n\n### REAL-TIME TELEMETRY:\n- No live swarm telemetry available yet."
         
         db.log_event("SOP_QUERY", f"AI searched for: {situation_query}")
 
@@ -44,7 +42,8 @@ def retrieve_sop(situation_query: str) -> str:
     except Exception as e:
         return f"Retrieval Error: {e}"
     finally:
-        db.close()
+        if db is not None:
+            db.close()
 
 def create_sop_expert(llm_config):
     # 🌟 请确保参数之间的逗号（,）都在正确的位置
@@ -52,11 +51,13 @@ def create_sop_expert(llm_config):
         name="SOP_Expert",
         system_message="""You are the Compliance Officer. 
         CRITICAL: No drone is allowed to move until you verify the SOP and the real-time battery.
-        Whenever the Planner suggests a move, you MUST call 'retrieve_sop' and report:
-        1. What the SOP says.
-        2. What the current battery in MongoDB is.
-        Only then, say 'APPROVED' or 'REJECTED'.
-        You must start your response with: 'Based on SOP retrieval from MongoDB...'. Mention the specific rule index found,
+        Call 'retrieve_sop' ONCE per mission brief, then produce a strict decision.
+        Your output must include:
+        1. Applicable SOP rule(s).
+        2. Battery/safety check summary.
+        3. Final verdict line exactly as either 'APPROVED FOR COMMANDER' or 'REJECTED'.
+        After your verdict, DO NOT call retrieve_sop again unless the mission brief changes.
+        Keep response concise and operational.
         """,
         llm_config=llm_config,
     )

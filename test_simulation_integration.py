@@ -79,18 +79,45 @@ def test_simulation_integration():
     result = mcp_server.get_human_intelligence()
     print(f"   {result}")
     
-    # Run autonomous agent for one step
-    print("\n[7] Running CommandAgent for mission step...")
+    # Run the full multi-agent swarm ONCE.
+    # The agents issue move_to / thermal_scan / extract_survivors tool calls internally
+    # and signal TERMINATE when mission_complete=True.  Do NOT loop here — each call
+    # to run_multiagent_brief already runs up to max_round agent turns.
+    print("\n[7] Running multi-agent swarm (single full run)...")
     print("-" * 70)
-    
+
+    state = mission_manager.get_status()
+    survivors_data = state.get('survivors', [])
+    total_survivors = len(survivors_data)
+    unrescued = [s for s in survivors_data if not s.get('rescued', False)]
+
+    # Build a brief that includes known survivor positions so the Planner can target them.
+    brief_lines = [
+        f"Objective: Search and Rescue — locate {total_survivors} survivors on a 20x20 grid.",
+        f"Survivors rescued so far: 0/{total_survivors}.",
+        "",
+        "DRONE STATUS:",
+    ]
+    for drone in state.get('drones', []):
+        brief_lines.append(
+            f"  drone_{drone['id']}: Position {drone['pos']}, Battery {drone['battery']:.1f}%"
+        )
+    if unrescued:
+        brief_lines.append("")
+        brief_lines.append("KNOWN DISTRESS SIGNALS (send drones here first):")
+        for s in unrescued:
+            brief_lines.append(f"  - Survivor at {s.get('pos')}, Health {s.get('health', 100)}%")
+
+    mission_brief = "\n".join(brief_lines)
+
     try:
-        response = mission_manager.step()
-        print("\n[Agent Response]:")
-        print(response)
+        response = mission_manager.run_multiagent_brief(mission_brief)
+        print("   [Swarm Result]:")
+        print(f"   {response}")
     except Exception as e:
-        print(f"\n[ERROR] Agent execution failed: {e}")
-        print("Note: Make sure Ollama is running with llama3.1 model installed.")
-        print("Run: ollama pull llama3.1")
+        print(f"\n[ERROR] Multi-agent run failed: {e}")
+        print("Note: Make sure Ollama is running with llama3.2 model installed.")
+        print("Run: ollama pull llama3.2")
     
     # Get final state
     print("\n[8] Final State:")

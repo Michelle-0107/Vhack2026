@@ -1,3 +1,6 @@
+# DEPRECATED — NOT imported in the active agent flow.
+# Live telemetry is read from mcp_server.swarm_data in sop_agent.py.
+# The hardcoded drone_target="D1" and MongoDB drones-collection reads below are stale.
 import ollama
 from vhack_engine.database.database import Database
 
