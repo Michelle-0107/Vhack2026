@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from vhack_engine.services.mission_manager import MissionManager
 
 settings = Settings()
+mcp_server = MCPServer(host=settings.MCP_HOST, port=settings.MCP_PORT)
 app = FastAPI(
     title="VHack 2026 - Autonomous Drone Orchestrator",
     description="API for controlling the search and rescue drone fleet with AI-powered command agent.",
@@ -66,9 +67,10 @@ def start_mission(num_drones: int = 3, num_survivors: int = 5):
     """Start a new search and rescue mission."""
     mission_manager.start_mission(num_drones=num_drones, num_survivors=num_survivors)
     return {
-        "message": "Mission started with AI CommandAgent",
+        "message": "Mission started with multi-agent orchestration",
         "num_drones": num_drones,
-        "num_survivors": num_survivors
+        "num_survivors": num_survivors,
+        "mode": "multiagent",
     }
 
 
@@ -112,8 +114,8 @@ async def trigger_ai_commander(deployment: IntelligenceReport):
             "Check current drone status, verify signal networks, and deploy resources as needed."
         )
         
-        # Run the CommandAgent
-        response = mission_manager.command_agent.run(mission_brief)
+        # Run the multi-agent orchestration
+        response = mission_manager.run_multiagent_brief(mission_brief)
         
         return {
             "status": "SUCCESS",
@@ -131,6 +133,8 @@ async def trigger_ai_commander(deployment: IntelligenceReport):
 @app.get("/tools")
 def list_tools():
     """List all available MCP tools."""
+    if not mission_manager.tool_loader:
+        return {"count": 0, "tools": [], "note": "LangChain tool loader not available"}
     tools = mission_manager.tool_loader.tools
     return {
         "count": len(tools),

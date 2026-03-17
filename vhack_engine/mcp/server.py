@@ -4,6 +4,8 @@ Uses FastMCP to provide MCP-compatible tool interface for LangChain agents.
 """
 from mcp.server.fastmcp import FastMCP
 import math
+from vhack_engine.environment.disaster_map import BASE_STATION_POS
+from vhack_engine.services.fleet_optimizer import FleetOptimizer
 
 # Initialize the Server
 mcp = FastMCP("BeaconNetServer")
@@ -13,6 +15,8 @@ swarm_data = {}
 known_dead_zones = []
 environmental_hazards = {"gas_leak": (15, 15), "fire": (45, 25)}
 human_intelligence_database = "No manual intelligence provided yet."
+_human_intelligence_fresh = False
+_fleet_optimizer = FleetOptimizer()
 
 # Reference to MESA DisasterModel (for direct simulation control)
 _simulation_model = None
@@ -22,6 +26,20 @@ def set_simulation_model(model):
     """Link the MESA DisasterModel for direct drone control."""
     global _simulation_model
     _simulation_model = model
+
+
+def set_drone_manager(drone_manager):
+    """Compatibility helper: mirror DroneManager state into swarm_data."""
+    swarm_data.clear()
+    for drone in drone_manager.list_drones():
+        pos = drone.get("position", [0, 0])
+        swarm_data[drone["id"]] = {
+            "x": int(pos[0]),
+            "y": int(pos[1]),
+            "battery": float(drone.get("battery", 100.0)),
+            "role": drone.get("role", "searcher"),
+            "status": drone.get("status", "idle"),
+        }
 
 
 def _get_drone_agent(drone_id: str):
@@ -44,10 +62,56 @@ def _get_drone_agent(drone_id: str):
     return None
 
 
+def _get_survivor_agents():
+    """Return all survivor agents in the active simulation."""
+    if _simulation_model is None:
+        return []
+
+    from vhack_engine.simulation.survivor_agent import SurvivorAgent
+
+    return [
+        agent for agent in _simulation_model.agents
+        if isinstance(agent, SurvivorAgent)
+    ]
+
+
+def _refresh_swarm_data():
+    """Keep shared swarm_data aligned with the live MESA simulation."""
+    if _simulation_model is None:
+        return
+
+    for drone_id in list(swarm_data.keys()):
+        drone_agent = _get_drone_agent(drone_id)
+        if drone_agent is None:
+            continue
+        swarm_data[drone_id]["x"] = int(drone_agent.pos[0])
+        swarm_data[drone_id]["y"] = int(drone_agent.pos[1])
+        swarm_data[drone_id]["battery"] = float(drone_agent.battery)
+
+
+def _mission_status_payload() -> dict:
+    """Build a real mission summary from the live simulation."""
+    _refresh_swarm_data()
+    survivors = _get_survivor_agents()
+    rescued = sum(1 for survivor in survivors if survivor.rescued)
+    remaining = len(survivors) - rescued
+    low_battery_drones = [
+        drone_id for drone_id, drone in swarm_data.items()
+        if float(drone.get("battery", 0.0)) < 20.0 and drone.get("role") != "relay"
+    ]
+    return {
+        "rescued": rescued,
+        "remaining": remaining,
+        "mission_complete": remaining == 0 and len(survivors) > 0,
+        "low_battery_drones": low_battery_drones,
+    }
+
+
 # --- CORE DRONE TOOLS ---
 @mcp.tool()
 def get_swarm_status() -> str:
     """Returns the current status, location, and battery of all drones."""
+    _refresh_swarm_data()
     return str(swarm_data)
 
 
@@ -72,6 +136,12 @@ def get_battery_status(drone_id: str) -> str:
 def move_to(drone_id: str, x: int, y: int) -> str:
     """Move a drone to specific x, y coordinates."""
     if drone_id in swarm_data:
+        _refresh_swarm_data()
+        current_battery = float(swarm_data[drone_id].get("battery", 0.0))
+        if current_battery < 20.0 and (x, y) != BASE_STATION_POS:
+            x, y = BASE_STATION_POS
+            swarm_data[drone_id]["status"] = "returning_to_base"
+
         # Update swarm_data dict
         swarm_data[drone_id]["x"] = x
         swarm_data[drone_id]["y"] = y
@@ -83,6 +153,9 @@ def move_to(drone_id: str, x: int, y: int) -> str:
             x_clamped = max(0, min(x, _simulation_model.grid.width - 1))
             y_clamped = max(0, min(y, _simulation_model.grid.height - 1))
             drone_agent.move_to(x_clamped, y_clamped)
+            swarm_data[drone_id]["status"] = "returning_to_base" if (x_clamped, y_clamped) == BASE_STATION_POS else "searching"
+            if current_battery < 20.0 and (x_clamped, y_clamped) == BASE_STATION_POS:
+                return f"SAFETY OVERRIDE: {drone_id} battery is below 20%. Drone returned to base at {BASE_STATION_POS}."
             return f"SUCCESS: {drone_id} moved to ({x_clamped}, {y_clamped}) in simulation."
         
         return f"SUCCESS: {drone_id} position updated to ({x}, {y})."
@@ -113,7 +186,8 @@ def get_drone_status(drone_id: str) -> str:
 def show_disaster_map(mode: str = "standard") -> str:
     """Displays a visual ASCII radar map of the swarm."""
     grid = [[" . " for _ in range(6)] for _ in range(6)]
-    grid[0][0] = " H "  # Home Base
+    base_gx, base_gy = min(BASE_STATION_POS[0] // 10, 5), min(BASE_STATION_POS[1] // 10, 5)
+    grid[base_gy][base_gx] = " H "  # Home Base
 
     for d_id, data in swarm_data.items():
         gx, gy = min(data["x"] // 10, 5), min(data["y"] // 10, 5)
@@ -138,7 +212,7 @@ def thermal_scan(drone_id: str) -> str:
     drone_agent = _get_drone_agent(drone_id)
     if drone_agent and _simulation_model:
         # Use the drone's scan() method with 2-cell radius
-        survivors = drone_agent.scan(radius=2)
+        survivors = [survivor for survivor in drone_agent.scan(radius=2) if not survivor.rescued]
         
         if survivors:
             survivor_details = []
@@ -159,28 +233,132 @@ def thermal_scan(drone_id: str) -> str:
 
 
 @mcp.tool()
+def extract_survivors(drone_id: str, radius: int = 2) -> str:
+    """Mark nearby detected survivors as rescued."""
+    if drone_id not in swarm_data:
+        return "Drone not found."
+
+    drone_agent = _get_drone_agent(drone_id)
+    if drone_agent is None:
+        return "Simulation model not available."
+
+    rescued_survivors = []
+    for survivor in _get_survivor_agents():
+        if survivor.rescued:
+            continue
+        distance = abs(survivor.pos[0] - drone_agent.pos[0]) + abs(survivor.pos[1] - drone_agent.pos[1])
+        if distance <= radius:
+            survivor.rescue()
+            rescued_survivors.append(f"survivor_{survivor.unique_id}@{survivor.pos}")
+
+    status = _mission_status_payload()
+    if not rescued_survivors:
+        return f"No survivors extracted by {drone_id}. Remaining survivors: {status['remaining']}."
+
+    swarm_data[drone_id]["status"] = "extracting"
+    return (
+        f"EXTRACTION SUCCESS: {drone_id} rescued {len(rescued_survivors)} survivor(s): "
+        f"{', '.join(rescued_survivors)}. Remaining survivors: {status['remaining']}."
+    )
+
+
+@mcp.tool()
+def return_to_base(drone_id: str) -> str:
+    """Recall a drone back to the fixed home base."""
+    if drone_id not in swarm_data:
+        return "Drone not found."
+
+    _refresh_swarm_data()
+    battery = float(swarm_data[drone_id].get("battery", 0.0))
+    if battery >= 20.0:
+        return (
+            f"NO ACTION: {drone_id} battery is {battery:.1f}% (>=20%). "
+            "Return-to-base is only required for low-battery safety."
+        )
+
+    return move_to(drone_id, BASE_STATION_POS[0], BASE_STATION_POS[1])
+
+
+@mcp.tool()
+def all_drones_return() -> str:
+    """Recall all drones and relay nodes to the fixed base station."""
+    if not swarm_data:
+        return "No drones are registered in swarm_data."
+
+    _refresh_swarm_data()
+    recalled = []
+    for drone_id in list(swarm_data.keys()):
+        result = move_to(drone_id, BASE_STATION_POS[0], BASE_STATION_POS[1])
+        recalled.append(f"{drone_id}: {result}")
+
+    return "ALL DRONES RETURN COMPLETE:\n" + "\n".join(recalled)
+
+
+@mcp.tool()
+def get_mission_status() -> str:
+    """Return real mission completion and battery status from the live simulation."""
+    status = _mission_status_payload()
+    low_battery = ", ".join(status["low_battery_drones"]) or "none"
+    return (
+        f"MISSION STATUS: rescued={status['rescued']}, remaining={status['remaining']}, "
+        f"mission_complete={status['mission_complete']}, low_battery_drones={low_battery}"
+    )
+
+
+def is_mission_complete() -> bool:
+    """Return True only when all survivors in the live simulation are rescued."""
+    return _mission_status_payload()["mission_complete"]
+
+
+@mcp.tool()
 def check_signal_network(drone_id: str) -> str:
     """Checks signal strength. Intelligent Dead Zone Detection."""
     if drone_id not in swarm_data:
         return "Drone not found."
 
+    _refresh_swarm_data()
     drone = swarm_data[drone_id]
-    dist_to_base = math.sqrt(drone["x"] ** 2 + drone["y"] ** 2)
-    
-    # Check distance to nearest relay
-    dist_to_relay = dist_to_base
-    for d_id, data in swarm_data.items():
-        if data.get("role") == "relay" and d_id != drone_id:
-            d = math.sqrt((drone["x"] - data["x"]) ** 2 + (drone["y"] - data["y"]) ** 2)
-            dist_to_relay = min(dist_to_relay, d)
+    drones_snapshot = [
+        {
+            "id": d_id,
+            "position": (int(data["x"]), int(data["y"])),
+            "role": data.get("role", "searcher"),
+            "battery": float(data.get("battery", 100.0)),
+        }
+        for d_id, data in swarm_data.items()
+    ]
+    connectivity = _fleet_optimizer.ensure_relay_connectivity(
+        drones_snapshot,
+        base_position=BASE_STATION_POS,
+        max_link_distance=20.0,
+    )
 
-    if dist_to_relay > 40:
+    for gap in connectivity["gaps"]:
+        if gap["drone_id"] != drone_id:
+            continue
+        order = next(
+            (
+                relay_order
+                for relay_order in connectivity["relay_orders"]
+                if relay_order["target_drone_id"] == drone_id
+            ),
+            None,
+        )
+        if order:
+            relay_pos = tuple(order["relay_position"])
+            return (
+                f"CRITICAL: {drone_id} connectivity broken. "
+                f"ORDER relay drone {order['relay_drone_id']} to position {relay_pos} to restore chain."
+            )
         known_dead_zones.append((drone["x"], drone["y"]))
-        return f"CRITICAL: {drone_id} is in a Dead Zone (Signal 0%). Memory updated."
-    elif dist_to_relay > 20:
+        return f"CRITICAL: {drone_id} is in a Dead Zone (Signal 0%). No relay candidate available."
+
+    base_dx = drone["x"] - BASE_STATION_POS[0]
+    base_dy = drone["y"] - BASE_STATION_POS[1]
+    dist_to_base = math.sqrt(base_dx ** 2 + base_dy ** 2)
+    if dist_to_base > 20:
         return f"WARNING: {drone_id} signal weak (40%). Consider deploying relay."
-    else:
-        return f"{drone_id} signal is strong (95%)."
+    return f"{drone_id} signal is strong (95%)."
 
 
 @mcp.tool()
@@ -235,8 +413,9 @@ def inject_human_intelligence(intel_report: str) -> str:
     [COMMAND TOOL] Used by HUMAN COMMANDERS to override AI assumptions.
     Injects verbal intelligence from survivors into the swarm's memory.
     """
-    global human_intelligence_database
+    global human_intelligence_database, _human_intelligence_fresh
     human_intelligence_database = intel_report
+    _human_intelligence_fresh = True
     return f"CRITICAL OVERRIDE: Human intelligence registered -> '{intel_report}'"
 
 
@@ -246,8 +425,9 @@ def get_human_intelligence() -> str:
     [TELEMETRY TOOL] Reads the latest manual overrides from human commanders.
     Always run this to check for high-priority human instructions.
     """
-    global human_intelligence_database
-    if human_intelligence_database != "No manual intelligence provided yet.":
+    global human_intelligence_database, _human_intelligence_fresh
+    if _human_intelligence_fresh and human_intelligence_database != "No manual intelligence provided yet.":
+        _human_intelligence_fresh = False
         return f"HIGH PRIORITY INTEL: {human_intelligence_database}"
     return "No new human intelligence."
 

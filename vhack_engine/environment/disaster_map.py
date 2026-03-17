@@ -4,6 +4,10 @@ Disaster Map - Defines the static layout and hazard zones of the disaster enviro
 from vhack_engine.environment.sectors import Sector
 
 
+# Fixed home base coordinate used by navigation and safety logic.
+BASE_STATION_POS: tuple[int, int] = (10, 10)
+
+
 class DisasterMap:
     """
     Holds the static properties of the disaster zone: dimensions,
