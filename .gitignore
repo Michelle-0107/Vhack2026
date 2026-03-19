@@ -1,0 +1,30 @@
+.venv/
+venv/
+.venv
+
+__pycache__/
+*.py[cod]
+auth.json
+
+.env
+
+data/
+
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+.cache/
+vhack_mission_log.txt
+mission_comms.log
+
+# Node / UI
+node_modules/
+dist/
+.vite/
+
+# System
+.DS_Store
