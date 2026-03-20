@@ -24,9 +24,6 @@ An AI-powered Search and Rescue (SAR) mission control system. This project utili
 
 ### 2. Backend Setup
 ```bash
-# Navigate to root
-cd mergefile
-
 # Create and activate virtual environment
 python -m venv .venv
 .\.venv\Scripts\activate
