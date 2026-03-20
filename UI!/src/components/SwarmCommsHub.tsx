@@ -21,8 +21,7 @@ import type { LogEntryData, PinnedEntry, TargetMarker } from "../types";
 import type { FleetState } from "../hooks/useFleet";
 import { PinnedMessage } from "./logs/PinnedMessage";
 
-
-const PIN_MAX = 3;
+const PIN_MAX = 5; // Increased slightly so multiple victims can be pinned at once
 
 function SignalBars({ sig }: { sig: string }) {
   const strength = sigStrength(sig);
@@ -202,13 +201,13 @@ export function SwarmCommsHub({ fleet, showLegend, setShowLegend }: { fleet: Fle
   const activeTargets = useMemo(() => targetMarkers.filter(m => !m.isRescued), [targetMarkers]);
   const securedTargets = useMemo(() => targetMarkers.filter(m => m.isRescued), [targetMarkers]);
   const selTarget = useMemo(() => targetMarkers.find(m => m.id === selectedTargetId) ?? null, [targetMarkers, selectedTargetId]);
+
+  // Exclude pinned messages from the general scrolling history
   const historyLogs = useMemo(() => log.filter(item => !pinnedMessages.some(p => p.id === item.id)), [log, pinnedMessages]);
 
-  // FIXED SMART-SCROLL LOGIC
   useEffect(() => {
     const el = logRef.current;
     if (!el) return;
-    // Only snap to bottom if the user is already within 100px of the bottom
     const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
     if (isNearBottom) {
       el.scrollTop = el.scrollHeight;
@@ -234,9 +233,12 @@ export function SwarmCommsHub({ fleet, showLegend, setShowLegend }: { fleet: Fle
       const newMessages = log.slice(startIndex);
       lastProcessedLogIdRef.current = log[log.length - 1].id;
 
-      const toPin = newMessages.filter(shouldPin).map(newest => {
-        const normalizedSender = normalizePinnedSender(newest.sender);
+      // MODIFIED: Pin messages if they meet shouldPin() criteria OR if they are HUMAN (Target found)
+      const toPin = newMessages.filter(msg => shouldPin(msg) || msg.type === "HUMAN").map(newest => {
+        // We ensure HUMAN logs get an explicit sender name so PinnedMessage.tsx can render it properly
+        const normalizedSender = newest.type === "HUMAN" ? "SWARM RADAR" : normalizePinnedSender(newest.sender);
         if (!normalizedSender) return null;
+
         return {
           id: newest.id,
           sender: normalizedSender,
@@ -391,6 +393,7 @@ export function SwarmCommsHub({ fleet, showLegend, setShowLegend }: { fleet: Fle
           </button>
         </div>
 
+        {/* --- PINNED LOG AREA --- */}
         <PinnedMessage
           pinnedMessages={pinnedMessages}
           onEvict={evictPinned}
@@ -438,7 +441,22 @@ export function SwarmCommsHub({ fleet, showLegend, setShowLegend }: { fleet: Fle
             style={{ width: "100%", resize: "none", background: "rgba(255,0,204,0.04)", border: `1px solid ${HUMAN_MAG}44`, borderRadius: 8, padding: "10px 42px 10px 12px", fontSize: 14, fontFamily: "'Roboto Mono',monospace", color: LABEL_PRIMARY, outline: "none", boxSizing: "border-box" }}
           />
           <button onClick={submitIntel} disabled={!intelText.trim()}
-            style={{ position: "absolute", right: 8, bottom: 9, background: intelText.trim() ? `${HUMAN_MAG}22` : "transparent", border: `1px solid ${intelText.trim() ? HUMAN_MAG + "77" : "#ffffff15"}`, color: intelText.trim() ? HUMAN_MAG : "#555", borderRadius: 6, width: 28, height: 28, cursor: intelText.trim() ? "pointer" : "not-allowed", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold" }}>→</button>
+            style={{
+              position: "absolute",
+              right: 8,
+              bottom: 9,
+              background: intelText.trim() ? `${HUMAN_MAG}22` : "transparent",
+              border: `1px solid ${intelText.trim() ? HUMAN_MAG + "77" : "#ffffff15"}`,
+              color: intelText.trim() ? HUMAN_MAG : "#555",
+              borderRadius: 6,
+              width: 28,
+              height: 28,
+              cursor: intelText.trim() ? "pointer" : "not-allowed",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontWeight: "bold"
+            }}>→</button>
         </div>
       </div>
 

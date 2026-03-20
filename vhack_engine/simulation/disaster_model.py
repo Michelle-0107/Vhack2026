@@ -4,12 +4,12 @@ Manages the simulation grid, spawns drones and survivors, and tracks mission sta
 """
 from mesa import Model
 from mesa.space import MultiGrid
+import math # <-- ADDED for circular spawning
 
 from vhack_engine.simulation.drone_agent import DroneAgent
 from vhack_engine.simulation.survivor_agent import SurvivorAgent
 
 BASE_STATION_POS = (10, 10)
-
 
 class DisasterModel(Model):
     """
@@ -33,16 +33,33 @@ class DisasterModel(Model):
 
     def _spawn_agents(self):
         """Place drone and survivor agents on the grid."""
+        # 1. Spawn Drones at Base
         for _ in range(self.num_drones):
             drone = DroneAgent(self)
             self.grid.place_agent(drone, BASE_STATION_POS)
             drone.visit_count[drone.pos] = 1
             drone.scanned_cells.add(drone.pos)
 
+        # 2. Spawn Survivors in a circle around the base
+        MAX_RADIUS = 8 # 8 grid cells is roughly a 2km equivalent on this map
+
         for _ in range(self.num_survivors):
             survivor = SurvivorAgent(self)
-            x = self.random.randrange(self.grid.width)
-            y = self.random.randrange(self.grid.height)
+            
+            # Pick a random angle (0 to 360 degrees in radians)
+            angle = self.random.uniform(0, 2 * math.pi)
+            
+            # Pick a random distance from the center (sqrt ensures even spread)
+            distance = MAX_RADIUS * math.sqrt(self.random.uniform(0, 1))
+            
+            # Calculate grid coordinates relative to BASE_STATION_POS
+            raw_x = BASE_STATION_POS[0] + distance * math.cos(angle)
+            raw_y = BASE_STATION_POS[1] + distance * math.sin(angle)
+            
+            # Convert to integers and ensure they stay within the 20x20 map boundaries
+            x = max(0, min(self.grid.width - 1, int(raw_x)))
+            y = max(0, min(self.grid.height - 1, int(raw_y)))
+            
             self.grid.place_agent(survivor, (x, y))
 
     def step(self):

@@ -1,12 +1,13 @@
 """
 main.py - Application entry point for the VHack Drone Orchestrator.
-Updated with FastAPI Lifespan and improved WebSocket broadcasting.
+Updated with FastAPI Lifespan, improved WebSocket broadcasting, and Backend Sector Tracking.
 """
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import asyncio
 import os
+import random
 from contextlib import asynccontextmanager
 
 # These imports are likely failing due to pathing issues
@@ -31,11 +32,48 @@ def read_log_file_lines(max_lines: int = 20):
     except Exception:
         return []
 
+# --- ADDED: Backend Coverage Tracker (Heatmap) ---
+class SectorMap:
+    def __init__(self, map_size=5000, sector_size=500):
+        self.map_size = map_size
+        self.sector_size = sector_size
+        self.visited_sectors = set()
+
+    def mark_searched(self, x, y):
+        """Records a sector as 'searched' based on a drone's current coordinates"""
+        # Ensure we don't crash if x/y are missing or None
+        if x is None or y is None: return
+        
+        grid_x = int(x // self.sector_size)
+        grid_y = int(y // self.sector_size)
+        self.visited_sectors.add(f"{grid_x},{grid_y}")
+
+    def get_unsearched_waypoint(self):
+        """Returns the (x, y) center of a random unsearched sector"""
+        max_grid = int(self.map_size // self.sector_size)
+        
+        # Try up to 100 times to find a blank spot
+        for _ in range(100):
+            gx = random.randint(0, max_grid - 1)
+            gy = random.randint(0, max_grid - 1)
+            if f"{gx},{gy}" not in self.visited_sectors:
+                # Add a little randomness so they don't fly to the exact dead-center pixel every time
+                jitter_x = random.randint(-150, 150)
+                jitter_y = random.randint(-150, 150)
+                return (gx * self.sector_size) + 250 + jitter_x, (gy * self.sector_size) + 250 + jitter_y
+                
+        # If the map is fully searched, wipe memory and start a second sweep!
+        self.visited_sectors.clear()
+        return random.randint(500, 4500), random.randint(500, 4500)
+
+# Instantiate the global radar tracker
+swarm_radar = SectorMap()
+
+
 # --- CONFIG & MANAGERS ---
 settings = Settings()
 manager = None # Defined inside lifespan
 
-# --- ADDED Pydantic Model to fix NameError ---
 class IntelligenceReport(BaseModel):
     intelligence_report: str
 
@@ -65,7 +103,7 @@ mission_manager = MissionManager()
 # --- BACKGROUND TASK ---
 async def physics_loop():
     """Background task to continuously run simulation and broadcast."""
-    print("[Physics] Loop Started.")
+    print("[Physics] Loop Started. Sector tracking active.")
     while True:
         try:
             if mission_manager.active and mission_manager.model:
@@ -78,6 +116,17 @@ async def physics_loop():
             # 3. Prepare the payload for the UI
             data = mission_manager.get_status()
             data["ai_logs"] = read_log_file_lines()
+            
+            # --- NEW: Update Backend Radar based on actual drone positions ---
+            if "drones" in data and isinstance(data["drones"], list):
+                for drone in data["drones"]:
+                    # Safely handle missing x/y data from the backend state
+                    if hasattr(drone, 'get'):
+                        dx = drone.get("x", None)
+                        dy = drone.get("y", None)
+                        swarm_radar.mark_searched(dx, dy)
+                    elif hasattr(drone, 'x') and hasattr(drone, 'y'):
+                        swarm_radar.mark_searched(drone.x, drone.y)
             
             # 4. Push to all WebSockets
             await ws_manager.broadcast(data)
@@ -131,7 +180,8 @@ async def websocket_endpoint(websocket: WebSocket):
         ws_manager.disconnect(websocket)
 
 @app.post("/mission/start")
-async def start_mission(num_drones: int = 3, num_survivors: int = 5):
+async def start_mission(num_drones: int = 10, num_survivors: int = 10):
+    # Notice we changed the default to 10 drones to match the UI!
     mission_manager.start_mission(num_drones=num_drones, num_survivors=num_survivors)
     
     # Bridge to MCP
@@ -163,16 +213,31 @@ def list_drones():
     """Return the state of all registered drones."""
     return mission_manager.drone_manager.list_drones()
 
+# --- NEW: Endpoint for the LLM / MCP Tools to ask for a smart waypoint ---
+@app.get("/mission/suggest_waypoint")
+def get_suggested_waypoint():
+    """Returns the coordinates of a sector that hasn't been searched yet."""
+    target_x, target_y = swarm_radar.get_unsearched_waypoint()
+    return {
+        "recommended_x": round(target_x, 2), 
+        "recommended_y": round(target_y, 2),
+        "sectors_searched": len(swarm_radar.visited_sectors),
+        "total_sectors": 100
+    }
 
 @app.post("/api/deploy")
 async def deploy(req: IntelligenceReport):
     def isolated_swarm_thread(intel):
         try:
             mission_manager.inject_intelligence(intel)
+            
+            # Inject the radar knowledge into the mission brief so the LLM knows what to do!
+            searched = len(swarm_radar.visited_sectors)
             mission_brief = (
                 f"CRITICAL INTEL RECEIVED: {intel}\n\n"
+                f"SYSTEM UPDATE: The swarm has currently mapped {searched}% of the search grid.\n"
                 "Analyze this intelligence and coordinate drone operations accordingly. "
-                "Check current drone status, verify signal networks, and deploy resources as needed."
+                "Check current drone status, verify signal networks, and deploy resources to unsearched sectors."
             )
             mission_manager.run_multiagent_brief(mission_brief)
         except Exception as e:

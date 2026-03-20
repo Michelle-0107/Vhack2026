@@ -28,13 +28,51 @@ export default function App() {
   const droneWaypoints = useRef<Record<string, { x: number; y: number; lockedOnSurvivor: boolean }>>({});
   const chargeWaitTimers = useRef<Record<string, number>>({});
 
-  // SCAN RADIUS: How close a drone must be to "reveal" a hidden victim on the map
   const SCAN_REVEAL_DISTANCE = 400;
 
-  const getRandomWaypoint = () => ({
-    x: 500 + Math.random() * 4000,
-    y: 500 + Math.random() * 4000
-  });
+  // --- SMART COVERAGE TRACKER ---
+  // We divide the 5000x5000 map into a grid of 500x500 blocks. (10x10 grid = 100 sectors)
+  const SECTOR_SIZE = 500;
+  const MAP_SIZE = 5000;
+  // A Set to store strings like "row,col" of visited sectors.
+  const visitedSectors = useRef<Set<string>>(new Set());
+
+  // Function to find an UNVISITED sector
+  const getSmartWaypoint = () => {
+    let bestX = WORLD_CENTER.x;
+    let bestY = WORLD_CENTER.y;
+    let foundUnvisited = false;
+    let attempts = 0;
+
+    // Try up to 50 times to find a random unvisited sector
+    while (!foundUnvisited && attempts < 50) {
+      // Pick a random grid coordinate (0 to 9)
+      const gridX = Math.floor(Math.random() * (MAP_SIZE / SECTOR_SIZE));
+      const gridY = Math.floor(Math.random() * (MAP_SIZE / SECTOR_SIZE));
+      const sectorKey = `${gridX},${gridY}`;
+
+      if (!visitedSectors.current.has(sectorKey)) {
+        // Convert the grid coordinate back to world coordinates (center of that sector)
+        bestX = (gridX * SECTOR_SIZE) + (SECTOR_SIZE / 2);
+        bestY = (gridY * SECTOR_SIZE) + (SECTOR_SIZE / 2);
+        foundUnvisited = true;
+      }
+      attempts++;
+    }
+
+    // If all sectors are visited (map is 100% searched), clear the history and start over!
+    if (!foundUnvisited) {
+      visitedSectors.current.clear();
+      bestX = 500 + Math.random() * 4000;
+      bestY = 500 + Math.random() * 4000;
+    }
+
+    // Add a tiny bit of randomness so they don't fly to the EXACT mathematical center of the block every time
+    return {
+      x: bestX + (Math.random() * 200 - 100),
+      y: bestY + (Math.random() * 200 - 100)
+    };
+  };
 
   useEffect(() => {
     const handleResize = () => {
@@ -73,16 +111,36 @@ export default function App() {
           const data = JSON.parse(event.data);
           if (!data.active) return;
 
-          // 1. Initialize Drones
+          // 1. Initialize 10 Drones Dynamically
           if (data.drones && Array.isArray(data.drones)) {
             setDrones(prevDrones => {
-              if (prevDrones.length === 3) return prevDrones;
+              if (prevDrones.length === 10) return prevDrones;
 
-              return [
-                { id: "DR-001", x: WORLD_CENTER.x, y: WORLD_CENTER.y, battery: 100, batteryFloat: 100, status: "DEPLOYED", trail: [], colour: "#1e64ff", sensorMode: "RF", altitude: 120, speed: 0, signal: "EXCELLENT", abortingToCenter: false },
-                { id: "DR-002", x: WORLD_CENTER.x, y: WORLD_CENTER.y, battery: 100, batteryFloat: 90, status: "DEPLOYED", trail: [], colour: "#00ff88", sensorMode: "THER", altitude: 150, speed: 0, signal: "EXCELLENT", abortingToCenter: false },
-                { id: "DR-003", x: WORLD_CENTER.x, y: WORLD_CENTER.y, battery: 100, batteryFloat: 80, status: "DEPLOYED", trail: [], colour: "#ff3355", sensorMode: "CV", altitude: 135, speed: 0, signal: "EXCELLENT", abortingToCenter: false }
-              ] as any;
+              const droneColors = ["#1e64ff", "#00ff88", "#ff3355", "#ff8800", "#ae00ff", "#ffee00", "#00fff2", "#ff00d4", "#ffffff", "#777777"];
+              const sensorModes: ("RF" | "THER" | "CV")[] = ["RF", "THER", "CV"];
+
+              const newFleet = Array.from({ length: 10 }, (_, i) => {
+                const idNumber = i + 1;
+                const idStr = `DR-${idNumber.toString().padStart(3, '0')}`;
+
+                return {
+                  id: idStr,
+                  x: WORLD_CENTER.x,
+                  y: WORLD_CENTER.y,
+                  battery: 100,
+                  batteryFloat: 100 - (i * 8), // Stagger battery start heavily
+                  status: "DEPLOYED",
+                  trail: [],
+                  colour: droneColors[i % droneColors.length],
+                  sensorMode: sensorModes[i % sensorModes.length],
+                  altitude: 120 + (i * 5),
+                  speed: 0,
+                  signal: "EXCELLENT",
+                  abortingToCenter: false
+                };
+              });
+
+              return newFleet as any;
             });
           }
 
@@ -100,7 +158,7 @@ export default function App() {
             });
           }
 
-          // 3. Survivor Data Feed (Keep them hidden initially)
+          // 3. Survivor Data Feed (Keep hidden initially)
           if (data.survivors && Array.isArray(data.survivors)) {
             setTargetMarkers(prev => {
               const newMarkers = [...prev];
@@ -111,15 +169,14 @@ export default function App() {
                 const exists = newMarkers.find(m => Math.hypot(m.wx - sx, m.wy - sy) < 50);
 
                 if (!exists) {
-                  // Push new survivor to the list, but mark as NOT discovered yet
                   newMarkers.push({
                     id: `SV-${s.id}`, droneId: "AI_SWARM", wx: sx, wy: sy,
                     confidence: s.confidence || 95, time: now8(), type: "HUMAN",
                     isRescued: s.rescued || false, rescueTime: s.rescued ? now8() : "",
-                    isDiscovered: false // <--- NEW FLAG
+                    isDiscovered: false
                   } as any);
 
-                  // Intercept logic: We still secretly route the nearest drone to it to ensure it gets found
+                  // Intercept logic: Secretly route the nearest drone
                   setDrones(currentDrones => {
                     let closestDrone = null;
                     let minDist = Infinity;
@@ -155,12 +212,11 @@ export default function App() {
 
   // ── Frontend Flight, Battery, & Radar Controller (10fps) ──
   useEffect(() => {
-    const flightSpeed = 25;
+    const flightSpeed = 35; // Slightly faster to cover the map better
     const drainRate = 0.08;
     const chargeRate = 0.50;
 
     const flightLoop = setInterval(() => {
-      // Phase 1: Move drones and calculate battery
       setDrones(prevDrones => {
         if (prevDrones.length === 0) return prevDrones;
 
@@ -168,6 +224,13 @@ export default function App() {
           let currentBatFloat = drone.batteryFloat ?? 100;
           let newStatus = drone.status;
           let wp = droneWaypoints.current[drone.id];
+
+          // 0. UPDATE COVERAGE TRACKER based on current drone position
+          if (newStatus === "DEPLOYED" && !drone.abortingToCenter) {
+            const currentGridX = Math.floor(drone.x / SECTOR_SIZE);
+            const currentGridY = Math.floor(drone.y / SECTOR_SIZE);
+            visitedSectors.current.add(`${currentGridX},${currentGridY}`);
+          }
 
           if (newStatus === "CHARGING") {
             const lockedX = WORLD_CENTER.x;
@@ -180,7 +243,7 @@ export default function App() {
               if (currentBatFloat >= 100) {
                 newStatus = "DEPLOYED";
                 pushLog({ type: "INFO", msg: `${drone.id} fully charged. Resuming patrol.` });
-                wp = { ...getRandomWaypoint(), lockedOnSurvivor: false };
+                wp = { ...getSmartWaypoint(), lockedOnSurvivor: false };
                 droneWaypoints.current[drone.id] = wp;
                 chargeWaitTimers.current[drone.id] = 0;
               }
@@ -207,7 +270,7 @@ export default function App() {
           }
 
           if (!wp) {
-            wp = { ...getRandomWaypoint(), lockedOnSurvivor: false };
+            wp = { ...getSmartWaypoint(), lockedOnSurvivor: false };
             droneWaypoints.current[drone.id] = wp;
           }
 
@@ -221,8 +284,9 @@ export default function App() {
             return { ...drone, x: WORLD_CENTER.x, y: WORLD_CENTER.y, status: "CHARGING", abortingToCenter: false, speed: 0, trail: [] };
           }
 
-          if (dist < 100 && !wp.lockedOnSurvivor && !drone.abortingToCenter) {
-            wp = { ...getRandomWaypoint(), lockedOnSurvivor: false };
+          // IF ARRIVED AT DESTINATION (Patrol or Victim): Keep moving!
+          if (dist < 100 && !drone.abortingToCenter) {
+            wp = { ...getSmartWaypoint(), lockedOnSurvivor: false };
             droneWaypoints.current[drone.id] = wp;
           }
 
@@ -244,20 +308,13 @@ export default function App() {
         });
       });
 
-      // Phase 2: Radar Check - Reveal victims if a drone flies near them
+      // Radar Check - Reveal victims
       setTargetMarkers((prevMarkers) => {
         let stateChanged = false;
 
-        // We need to access the current drone positions from the fleet hook safely
-        const currentDrones = useFleet.getState ? useFleet.getState().drones : [];
-        // Note: Because we are inside a setState, we can't easily grab the EXACT frame of drones,
-        // but since this runs at 10fps, using fleet.drones reference is completely fine.
-
         const updatedMarkers = prevMarkers.map((marker: any) => {
-          // If already discovered, keep it visible
           if (marker.isDiscovered) return marker;
 
-          // Check if any active drone is within SCAN_REVEAL_DISTANCE
           let nearDrone = false;
           let discoveringDroneId = "";
 
@@ -290,7 +347,6 @@ export default function App() {
 
   const zoomPercent = Math.max(0, Math.min(100, ((cameraCtrl.camera.zoom - MIN_ZOOM) / (MAX_ZOOM - MIN_ZOOM)) * 100));
 
-  // Only pass DISCOVERED markers to the map components to render
   const visibleMarkers = fleet.targetMarkers.filter((m: any) => m.isDiscovered !== false);
 
   return (
@@ -308,10 +364,8 @@ export default function App() {
           onMouseUp={cameraCtrl.handleMouseUp}
           onMouseLeave={cameraCtrl.handleMouseUp}
         >
-          {/* Inject only the VISIBLE markers to MapCanvas */}
           <MapCanvas fleet={{ ...fleet, targetMarkers: visibleMarkers }} cameraCtrl={cameraCtrl} screenSize={screenSize} trackMode={trackMode} />
 
-          {/* Inject only the VISIBLE markers to MiniMap */}
           <MiniMap
             drones={fleet.drones} targetMarkers={visibleMarkers} selectedTargetId={fleet.selectedTargetId}
             camera={cameraCtrl.camera} screenSize={screenSize} onNavigate={(wx, wy) => cameraCtrl.panTo(wx, wy)}
@@ -358,7 +412,6 @@ export default function App() {
           )}
         </div>
 
-        {/* SwarmCommsHub needs the full fleet to display the stats correctly */}
         <SwarmCommsHub fleet={{ ...fleet, targetMarkers: visibleMarkers }} showLegend={showLegend} setShowLegend={setShowLegend} />
       </div>
     </div>
